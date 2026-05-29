@@ -1,0 +1,69 @@
+const prisma = require('../utils/prisma');
+
+// ── GET /api/notificaciones ───────────────────────────────────
+// Lista las notificaciones NO LEÍDAS. Acepta ?sedeId para filtrar.
+const listar = async (req, res, next) => {
+  try {
+    const { sedeId } = req.query;
+
+    const items = await prisma.notificacion.findMany({
+      where: {
+        leida: false,
+        ...(sedeId && { sedeId }),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    res.json({
+      total: items.length,
+      items,
+    });
+  } catch (err) { next(err); }
+};
+
+// ── PATCH /api/notificaciones/:id/leida ───────────────────────
+// Marca una notificación como leída.
+const marcarLeida = async (req, res, next) => {
+  try {
+    const notif = await prisma.notificacion.findUnique({ where: { id: req.params.id } });
+    if (!notif) return res.status(404).json({ error: 'Notificación no encontrada' });
+
+    if (notif.leida) return res.json(notif); // ya estaba leída, idempotente
+
+    const actualizada = await prisma.notificacion.update({
+      where: { id: req.params.id },
+      data:  {
+        leida:    true,
+        leidaEn:  new Date(),
+        leidaPor: req.usuario.id,
+      },
+    });
+
+    res.json(actualizada);
+  } catch (err) { next(err); }
+};
+
+// ── PATCH /api/notificaciones/marcar-todas-leidas ─────────────
+// Marca todas las no leídas como leídas (opcionalmente filtrando por sede).
+const marcarTodasLeidas = async (req, res, next) => {
+  try {
+    const { sedeId } = req.body;
+
+    const resultado = await prisma.notificacion.updateMany({
+      where: {
+        leida: false,
+        ...(sedeId && { sedeId }),
+      },
+      data: {
+        leida:    true,
+        leidaEn:  new Date(),
+        leidaPor: req.usuario.id,
+      },
+    });
+
+    res.json({ marcadas: resultado.count });
+  } catch (err) { next(err); }
+};
+
+module.exports = { listar, marcarLeida, marcarTodasLeidas };

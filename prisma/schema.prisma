@@ -1,0 +1,414 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Sede {
+  id        String          @id @default(uuid())
+  nombre    String
+  ciudad    String
+  activo    Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  olts      Olt[]
+  ordenes   OrdenServicio[]
+  usuarios  Usuario[]
+  contratos Contrato[]
+  puntosRed PuntoRed[]                        // ← NUEVO
+
+  @@map("sedes")
+}
+
+model Usuario {
+  id           String        @id @default(uuid())
+  nombre       String
+  apellido     String
+  email        String        @unique
+  password     String
+  rol          Rol           @default(TECNICO)
+  telefono     String?
+  activo       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sedeId       String?
+  tecnico      Tecnico?
+  tokensSesion TokenSesion[]
+  sede         Sede?         @relation(fields: [sedeId], references: [id])
+
+  @@map("usuarios")
+}
+
+model Tecnico {
+  id           String          @id @default(uuid())
+  usuarioId    String          @unique
+  dni          String          @unique
+  zonaAsignada String?
+  vehiculo     String?
+  activo       Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  ordenes      OrdenServicio[]
+  usuario      Usuario         @relation(fields: [usuarioId], references: [id])
+
+  @@map("tecnicos")
+}
+
+model TokenSesion {
+  id          String    @id @default(uuid())
+  usuarioId   String
+  token       String    @unique
+  dispositivo String?
+  activo      Boolean   @default(true)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  fechaCierre DateTime?
+  usuario     Usuario   @relation(fields: [usuarioId], references: [id])
+
+  @@map("tokens_sesion")
+}
+
+model Contrato {
+  numero     String   @id                                // "C00000006163"
+  abonado    String
+  dni        String?
+  celular    String?
+  direccion  String
+  referencia String?
+  sector     String?
+  sedeId     String
+  tipoServicio TipoServicio? 
+  ipWan      String?                                     // ← WAN del contrato
+  mascara    String?                                     // ← se hereda a las órdenes nuevas
+  gateway    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  sede       Sede            @relation(fields: [sedeId], references: [id])
+  ordenes    OrdenServicio[]
+
+  @@index([sedeId])
+  @@index([dni])
+  @@map("contratos")
+}
+
+model OrdenServicio {
+  id                String       @id @default(uuid())
+  nServicio         String       @unique
+  tipoOrden         TipoOrden
+  estado            EstadoOrden  @default(PENDIENTE_NOC)
+  fechaServicio     DateTime
+  contrato          String?      // FK al numero de Contrato (se mantiene el nombre para no romper código existente)
+  contratoRef       Contrato?    @relation(fields: [contrato], references: [numero])
+  pdfOriginalUrl    String?
+  sedeId            String?
+  abonado           String
+  dni               String?
+  direccion         String
+  referencia        String?
+  sector            String?
+  celular           String
+  observacion       String?
+  tecnicoId         String?
+  fechaAsignacion   DateTime?
+  ipWan             String?
+  mascara           String?
+  gateway           String?
+  fechaWan          DateTime?
+  nocUsuarioId      String?
+  fechaAceptacion   DateTime?
+  fechaInicio       DateTime?
+  fechaFin          DateTime?
+  tiempoInstalacion Int?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  instalacion       Instalacion?
+  sede              Sede?        @relation(fields: [sedeId], references: [id])
+  tecnico           Tecnico?     @relation(fields: [tecnicoId], references: [id])
+
+  @@map("ordenes_servicio")
+  @@index([contrato])
+}
+
+model Instalacion {
+  id                   String            @id @default(uuid())
+  ordenId              String            @unique
+  latitud              Float?
+  longitud             Float?
+  direccionGps         String?
+  fechaLlegada         DateTime?
+  modeloOnu            String?
+  marcaOnu             String?
+  serieOnu             String?
+  completada           Boolean           @default(false)
+  fechaFin             DateTime?
+  observaciones        String?
+  pendienteSincronizar Boolean           @default(false)
+  datosOffline         Json?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  configOnu            ConfigOnu?
+  fotos                FotoInstalacion[]
+  orden                OrdenServicio     @relation(fields: [ordenId], references: [id])
+
+  @@map("instalaciones")
+}
+
+model ConfigOnu {
+  id                String      @id @default(uuid())
+  instalacionId     String      @unique
+  ipWan             String?
+  mascara           String?
+  gateway           String?
+  dns1              String?
+  dns2              String?
+  ssid              String?
+  ssidPassword      String?
+  ssid5ghz          String?
+  ssidPassword5ghz  String?
+  mac               String?
+  serialNumber      String?
+  ponMode           String?
+  potenciaRx        Float?
+  potenciaTx        Float?
+  temperatura       Float?
+  voltaje           Float?
+  estado            String?
+  pppoeUser         String?
+  pppoePassword     String?
+  rawConfig         Json?
+  wanPrecargada     Boolean     @default(false)
+  configApp         Boolean     @default(false)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  estadoOlt         String?     @default("PENDIENTE_OLT") @db.VarChar(20)
+  oltId             String?
+  puertoOlt         String?     @db.VarChar(20)
+  onuIdOlt          String?     @db.VarChar(10)
+  fechaAutorizacion DateTime?   @db.Timestamp(6)
+  errorOlt          String?
+  vlan              String?     @db.VarChar(10)
+  instalacion       Instalacion @relation(fields: [instalacionId], references: [id])
+  olts              Olt?        @relation(fields: [oltId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("config_onu")
+}
+
+model FotoInstalacion {
+  id            String      @id @default(uuid())
+  instalacionId String
+  tipo          TipoFoto
+  url           String
+  nombreArchivo String
+  tamanio       Int?
+  createdAt     DateTime    @default(now())
+  instalacion   Instalacion @relation(fields: [instalacionId], references: [id])
+
+  @@map("fotos_instalacion")
+}
+
+model ModeloOnu {
+  id          String   @id @default(uuid())
+  marca       String
+  modelo      String
+  descripcion String?
+  ipDefault   String   @default("192.168.1.1")
+  userDefault String   @default("admin")
+  passDefault String   @default("admin")
+  protocolo   String   @default("HTTP")
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@unique([marca, modelo])
+  @@map("modelos_onu")
+}
+
+model OltFabricante {
+  id        Int         @id @default(autoincrement())
+  nombre    String      @unique @db.VarChar(100)
+  createdAt DateTime?   @default(now()) @db.Timestamp(6)
+  modelos   OltModelo[]
+  olts      Olt[]
+
+  @@map("olt_fabricantes")
+}
+
+model OltModelo {
+  id           Int           @id @default(autoincrement())
+  fabricanteId Int
+  nombre       String        @db.VarChar(100)
+  createdAt    DateTime?     @default(now()) @db.Timestamp(6)
+  fabricante   OltFabricante @relation(fields: [fabricanteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  olts         Olt[]
+
+  @@unique([fabricanteId, nombre])
+  @@map("olt_modelos")
+}
+
+model Olt {
+  id                String        @id @default(dbgenerated("(gen_random_uuid())::text"))
+  nombre            String        @unique @db.VarChar(150)
+  direccionIp       String        @db.VarChar(45)
+  fabricanteId      Int
+  modeloId          Int
+  usuario           String        @db.VarChar(100)
+  passwordHash      String        @db.VarChar(256)
+  puertoSnmp        Int           @default(161)
+  puertoSsh         Int           @default(22)
+  puertoTelnet      Int           @default(23)
+  snmpCommunity     String        @default("public") @db.VarChar(64)
+  estado            String        @default("Desconectado") @db.VarChar(20)
+  ultimaRevision    DateTime?     @db.Timestamp(6)
+  sedeId            String
+  activo            Boolean       @default(true)
+  createdAt         DateTime      @default(now()) @db.Timestamp(6)
+  updatedAt         DateTime      @default(now()) @updatedAt @db.Timestamp(6)
+  vlanDefecto       String        @default("100") @db.VarChar(10)
+  tContDefecto      String        @default("ENET-FIBER-1GB") @db.VarChar(100)
+  formatoOnuDefecto String        @default("ZTE-F625") @db.VarChar(50)
+  config_onu        ConfigOnu[]
+  fabricante        OltFabricante @relation(fields: [fabricanteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  modelo            OltModelo     @relation(fields: [modeloId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sede              Sede          @relation(fields: [sedeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([direccionIp, puertoSsh]) 
+  @@map("olts")
+}
+
+model LogActividad {
+  id         String   @id @default(uuid())
+  usuarioId  String?
+  accion     String
+  tabla      String?
+  registroId String?
+  detalles   Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@map("log_actividad")
+}
+
+model PuntoRed {
+  id        String      @id @default(uuid())
+  tipo      TipoPuntoRed
+  codigo    String      @unique               // "NAP-LAR-011"
+  latitud   Float
+  longitud  Float
+  capacidad Int?                              // puertos totales (8, 16...)
+  ocupados  Int         @default(0)           // puertos usados
+  estado    EstadoPuntoRed @default(ACTIVA)
+  sedeId    String
+  direccion String?                           // referencia textual
+  notas     String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  sede      Sede        @relation(fields: [sedeId], references: [id])
+
+  @@index([sedeId])
+  @@map("puntos_red")
+}
+
+model Notificacion {
+  id        String              @id @default(uuid())
+  tipo      TipoNotificacion
+  titulo    String
+  detalle   String?
+  link      String?                              // ej: "/pendientes" o "/onus-pendientes"
+  sedeId    String?                              // para filtrar por sede en el NOC
+  // Datos del origen — para no duplicar
+  ordenId   String?                              // si vino de una orden
+  configOnuId String?                            // si vino de una ONU
+  leida     Boolean             @default(false)
+  leidaEn   DateTime?
+  leidaPor  String?                              // userId del que la marcó
+  createdAt DateTime            @default(now())
+
+  @@index([leida, createdAt])                    // para listar las no-leídas rápido
+  @@index([sedeId])
+  @@index([ordenId])                             // evitar notificación duplicada
+  @@index([configOnuId])
+  @@map("notificaciones")
+}
+
+enum Rol {
+  SUPERADMIN
+  OPERADOR_NOC
+  ADMIN
+  TECNICO
+}
+
+enum TipoOrden {
+  INSTALACION_I
+  ALTA_SERVICIO_I
+  ATENCION_NOC_I
+  AVERIA_I
+  BAJA_SERVICIO_I
+  CAMBIO_CONTRASENA_I
+  CAMBIO_DOMICILIO_I
+  CAMBIO_EQUIPO_I
+  CAMBIO_PLAN_I
+  CAMBIO_TITULAR_I
+  CORTE_SOLICITUD_I
+  CORTE_DEUDA_I
+  RECONEXION_I
+  RETIRO_EQUIPO_I
+  TRASLADO_I
+  INSTALACION_C
+  ALTA_SERVICIO_C
+  AVERIA_C
+  CAMBIO_DOMICILIO_C
+  CAMBIO_PLAN_C
+  CAMBIO_TITULAR_C
+  CORTE_SOLICITUD_C
+  CORTE_DEUDA_C
+  INSTALACION_ANEXO_C
+  MIGRACION_FTTH_C
+  RECONEXION_C
+  RETIRO_EQUIPO_C
+  SUPERVISION_C
+  TRASLADO_C
+}
+
+enum EstadoOrden {
+  PENDIENTE_NOC
+  PENDIENTE_TECNICO
+  ACEPTADA
+  EN_PROCESO
+  COMPLETADA
+  CANCELADA
+  REPROGRAMADA
+}
+
+enum TipoFoto {
+  FOTO_1
+  FOTO_2
+  FOTO_3
+  CAJA_NAP
+  POTENCIA
+  INSTALACION_FINAL
+  OTROS
+}
+
+enum TipoPuntoRed {
+  NAP
+  CTO
+}
+
+enum EstadoPuntoRed {
+  ACTIVA
+  SATURADA
+  MANTENIMIENTO
+}
+
+enum TipoServicio {
+  INTERNET
+  CABLE
+  DUO
+}
+
+enum TipoNotificacion {
+  ORDEN_PENDIENTE_WAN
+  ONU_ERROR_OLT
+}

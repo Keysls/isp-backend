@@ -1,0 +1,479 @@
+const prisma = require('../utils/prisma');
+const { TIPO_LABEL } = require('../utils/tipoOrden');
+const { parsearExcelContratos } = require('../services/excel.service');
+const multer = require('multer');
+const path   = require('path');
+const fs     = require('fs');
+
+// Tipos de órdenes de Internet (todas las que terminan en _I)
+const TIPOS_INTERNET = [
+  'INSTALACION_I',  'RECONEXION_I',     'AVERIA_I',          'CAMBIO_EQUIPO_I',
+  'CAMBIO_DOMICILIO_I', 'TRASLADO_I',   'CORTE_DEUDA_I',     'CORTE_SOLICITUD_I',
+  'CAMBIO_TITULAR_I', 'CAMBIO_PLAN_I',  'CAMBIO_CONTRASENA_I',
+  'ALTA_SERVICIO_I',  'BAJA_SERVICIO_I','ATENCION_NOC_I',    'RETIRO_EQUIPO_I',
+];
+// ── Helper: calcula el estado del contrato a partir de su historial ──
+const TIPOS_CORTE = ['CORTE_DEUDA_I', 'CORTE_DEUDA_C', 'CORTE_SOLICITUD_I', 'CORTE_SOLICITUD_C'];
+const TIPOS_BAJA  = ['BAJA_SERVICIO_I', 'BAJA_SERVICIO_C', 'RETIRO_EQUIPO_I', 'RETIRO_EQUIPO_C'];
+
+const calcularEstado = (ordenes) => {
+  if (!ordenes || ordenes.length === 0) return 'SIN_ACTIVIDAD';
+
+  // ¿Hay una INSTALACION_I/C activa (no completada ni cancelada)?
+  const enInstalacion = ordenes.some(o =>
+    (o.tipoOrden === 'INSTALACION_I' || o.tipoOrden === 'INSTALACION_C') &&
+    o.estado !== 'COMPLETADA' && o.estado !== 'CANCELADA'
+  );
+  if (enInstalacion) return 'EN_INSTALACION';
+
+  // Última orden COMPLETADA
+  const ultimaCompletada = ordenes.find(o => o.estado === 'COMPLETADA');
+  if (!ultimaCompletada) return 'SIN_ACTIVIDAD';
+
+  if (TIPOS_CORTE.includes(ultimaCompletada.tipoOrden)) return 'CORTADO';
+  if (TIPOS_BAJA.includes(ultimaCompletada.tipoOrden))  return 'BAJA';
+  return 'ACTIVO';
+};
+
+
+// ── GET /api/contratos ────────────────────────────────────────
+const listar = async (req, res, next) => {
+  try {
+    const { search, sedeId, estado, soloInternet, tipoServicio, page = 1, limit = 20 } = req.query;
+    const where    = {};
+    const esSoloInternet = soloInternet === 'true';
+
+    // Scope por rol
+    if (req.usuario.rol === 'ADMIN') {
+      where.sedeId = req.usuario.sedeId;
+    } else if (sedeId) {
+      where.sedeId = sedeId;
+    }
+
+    // Búsqueda backend
+    if (search && search.trim()) {
+      const q = search.trim();
+      where.OR = [
+        { numero:    { contains: q, mode: 'insensitive' } },
+        { abonado:   { contains: q, mode: 'insensitive' } },
+        { dni:       { contains: q } },
+        { direccion: { contains: q, mode: 'insensitive' } },
+        { celular:   { contains: q } },
+      ];
+    }
+
+
+    // Filtro por tipo de servicio del contrato (INTERNET / CABLE)
+    if (tipoServicio === 'INTERNET' || tipoServicio === 'CABLE') {
+      where.tipoServicio = tipoServicio;
+    }
+
+    // Filtro NOC: solo contratos con al menos una orden de Internet
+    if (esSoloInternet) {
+      where.ordenes = { some: { tipoOrden: { in: TIPOS_INTERNET } } };
+    }
+
+    // Traer TODOS los que matchean
+    const contratos = await prisma.contrato.findMany({
+      where,
+      include: {
+        sede:    { select: { id: true, nombre: true } },
+        ordenes: {
+          where:   esSoloInternet ? { tipoOrden: { in: TIPOS_INTERNET } } : undefined,
+          orderBy: { fechaServicio: 'desc' },
+          select:  { tipoOrden: true, estado: true, fechaServicio: true },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    // Enriquecer con estado (calculado con las órdenes filtradas)
+    const enriquecidos = contratos.map(c => {
+      const ultima = c.ordenes[0] || null;
+      return {
+        numero:          c.numero,
+        abonado:         c.abonado,
+        dni:             c.dni,
+        celular:         c.celular,
+        direccion:       c.direccion,
+        referencia:      c.referencia,
+        sector:          c.sector,
+        sede:            c.sede,
+        estado:          calcularEstado(c.ordenes),
+        cantidadOrdenes: c.ordenes.length,
+        ultimaActividad: ultima?.fechaServicio || null,
+        ultimoTipoOrden: ultima?.tipoOrden     || null,
+        createdAt:       c.createdAt,
+      };
+    });
+
+    // Stats globales
+    const stats = { ACTIVO: 0, EN_INSTALACION: 0, CORTADO: 0, BAJA: 0, SIN_ACTIVIDAD: 0 };
+    enriquecidos.forEach(c => { stats[c.estado] = (stats[c.estado] || 0) + 1; });
+
+    // Filtrar por estado si vino
+    const filtrados = estado
+      ? enriquecidos.filter(c => c.estado === estado)
+      : enriquecidos;
+
+    // Paginar en memoria
+    const total = filtrados.length;
+    const take  = Number(limit);
+    const skip  = (Number(page) - 1) * take;
+    const data  = filtrados.slice(skip, skip + take);
+
+    res.json({
+      data,
+      total,
+      page:       Number(page),
+      limit:      take,
+      totalPages: Math.ceil(total / take),
+      stats,
+    });
+  } catch (err) { next(err); }
+};
+
+
+// ── GET /api/contratos/:numero ────────────────────────────────
+const obtener = async (req, res, next) => {
+  try {
+    const esSoloInternet = req.query.soloInternet === 'true';
+
+    const contrato = await prisma.contrato.findUnique({
+      where: { numero: req.params.numero },
+      include: {
+        sede: { select: { id: true, nombre: true, ciudad: true } },
+        ordenes: {
+          where: esSoloInternet ? { tipoOrden: { in: TIPOS_INTERNET } } : undefined,
+          orderBy: { fechaServicio: 'desc' },
+          include: {
+            tecnico: {
+              include: { usuario: { select: { nombre: true, apellido: true } } },
+            },
+            instalacion: {
+              select: {
+                id:         true,
+                completada: true,
+                fechaFin:   true,
+                marcaOnu:   true,
+                modeloOnu:  true,
+                serieOnu:   true,
+                configOnu:  {
+                  include: {
+                    olts: { select: { nombre: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!contrato) return res.status(404).json({ error: 'Contrato no encontrado' });
+
+    // Scope por rol: ADMIN solo su sede
+    if (req.usuario.rol === 'ADMIN' && contrato.sedeId !== req.usuario.sedeId) {
+      return res.status(403).json({ error: 'No tienes acceso a este contrato' });
+    }
+
+    // Última instalación completada con su config (= "equipo actual")
+    const ordenInstal = contrato.ordenes.find(
+      o => o.instalacion?.completada && o.instalacion?.configOnu
+    );
+    const equipoActual = ordenInstal ? {
+      instalacionId:    ordenInstal.instalacion.id,
+      fechaInstalacion: ordenInstal.instalacion.fechaFin,
+      // OLT donde se autorizó la ONU (puede ser null si no pasó por OLT)
+      oltNombre:        ordenInstal.instalacion.configOnu?.olts?.nombre || null,
+      serieOnu:         ordenInstal.instalacion.configOnu?.serialNumber
+                        || ordenInstal.instalacion.serieOnu
+                        || null,
+      configOnu:        ordenInstal.instalacion.configOnu,
+      desdeOrden:       { id: ordenInstal.id, nServicio: ordenInstal.nServicio },
+    } : null;
+
+    const ordenes = contrato.ordenes.map(o => ({
+      id:                o.id,
+      nServicio:         o.nServicio,
+      tipoOrden:         o.tipoOrden,
+      tipoOrdenLabel:    TIPO_LABEL[o.tipoOrden] || o.tipoOrden,
+      estado:            o.estado,
+      fechaServicio:     o.fechaServicio,
+      fechaFin:          o.fechaFin,
+      tiempoInstalacion: o.tiempoInstalacion,
+      tecnico:           o.tecnico ? {
+        id:       o.tecnico.id,
+        nombre:   o.tecnico.usuario.nombre,
+        apellido: o.tecnico.usuario.apellido,
+      } : null,
+      tieneInstalacion:  !!o.instalacion,
+      instalacionId:     o.instalacion?.id || null,
+    }));
+
+    res.json({
+      numero:     contrato.numero,
+      abonado:    contrato.abonado,
+      dni:        contrato.dni,
+      celular:    contrato.celular,
+      direccion:  contrato.direccion,
+      referencia: contrato.referencia,
+      sector:     contrato.sector,
+      sede:       contrato.sede,
+      estado:     calcularEstado(contrato.ordenes),
+      ipWan:      contrato.ipWan,
+      mascara:    contrato.mascara,
+      gateway:    contrato.gateway,
+      createdAt:  contrato.createdAt,
+      updatedAt:  contrato.updatedAt,
+      equipoActual,
+      ordenes,
+    });
+  } catch (err) { next(err); }
+};
+
+// ── GET /api/contratos/mapa ───────────────────────────────────
+const mapa = async (req, res, next) => {
+  try {
+    const { sedeId, estado, servicio } = req.query;   // servicio: 'internet' | 'cable' | undefined
+    const where = {};
+
+    // Scope por rol: ADMIN solo su sede
+    if (req.usuario.rol === 'ADMIN') {
+      where.sedeId = req.usuario.sedeId;
+    } else if (sedeId) {
+      where.sedeId = sedeId;
+    }
+
+    // Filtro por tipo de servicio (a nivel contrato: que tenga al menos una orden de ese tipo)
+    if (servicio === 'internet') {
+      where.ordenes = { some: { tipoOrden: { in: TIPOS_INTERNET } } };
+    } else if (servicio === 'cable') {
+      where.ordenes = { some: { tipoOrden: { notIn: TIPOS_INTERNET } } };
+    }
+
+    const contratos = await prisma.contrato.findMany({
+      where,
+      include: {
+        sede: { select: { id: true, nombre: true } },
+        ordenes: {
+          orderBy: { fechaServicio: 'desc' },
+          select: {
+            tipoOrden: true,
+            estado:    true,
+            fechaServicio: true,
+            instalacion: {
+              select: { latitud: true, longitud: true, fechaFin: true },
+            },
+          },
+        },
+      },
+    });
+
+    // Para cada contrato, buscar la instalación más reciente CON coordenadas
+    const puntos = [];
+    for (const c of contratos) {
+      let coord = null;
+      for (const o of c.ordenes) {
+        if (o.instalacion?.latitud != null && o.instalacion?.longitud != null) {
+          coord = { lat: o.instalacion.latitud, lng: o.instalacion.longitud };
+          break; // ordenes ya viene desc por fecha → la primera con GPS es la más nueva
+        }
+      }
+      if (!coord) continue; // sin coordenadas → no va al mapa
+
+      // Determinar qué servicios tiene el contrato (para el badge del popup)
+      const tieneInternet = c.ordenes.some(o => TIPOS_INTERNET.includes(o.tipoOrden));
+      const tieneCable    = c.ordenes.some(o => !TIPOS_INTERNET.includes(o.tipoOrden));
+      let servicioLabel = 'Cable';
+      if (tieneInternet && tieneCable) servicioLabel = 'Duo';
+      else if (tieneInternet)          servicioLabel = 'Internet';
+
+      puntos.push({
+        numero:    c.numero,
+        abonado:   c.abonado,
+        direccion: c.direccion,
+        sector:    c.sector,
+        sede:      c.sede,
+        estado:    calcularEstado(c.ordenes),
+        servicio:  servicioLabel,
+        latitud:   coord.lat,
+        longitud:  coord.lng,
+      });
+    }
+
+    // Filtro por estado si vino
+    const filtrados = estado ? puntos.filter(p => p.estado === estado) : puntos;
+
+    res.json({
+      total:  filtrados.length,
+      puntos: filtrados,
+    });
+  } catch (err) { next(err); }
+};
+
+// ── PATCH /api/contratos/:numero/wan ──────────────────────────
+// Registra o actualiza la IP/máscara/gateway del contrato.
+// Esta WAN se hereda a las órdenes nuevas del contrato.
+const guardarWan = async (req, res, next) => {
+  try {
+    const { ipWan, mascara, gateway } = req.body;
+
+    // Validación simple de formato IP
+    const esIp = (v) => /^(\d{1,3}\.){3}\d{1,3}$/.test(v || '');
+    if (!esIp(ipWan))   return res.status(400).json({ error: 'IP WAN inválida' });
+    if (!esIp(mascara)) return res.status(400).json({ error: 'Máscara inválida' });
+    if (!esIp(gateway)) return res.status(400).json({ error: 'Gateway inválido' });
+
+    // El contrato debe existir
+    const contrato = await prisma.contrato.findUnique({
+      where: { numero: req.params.numero },
+    });
+    if (!contrato) return res.status(404).json({ error: 'Contrato no encontrado' });
+
+    // Scope por rol: ADMIN solo su sede
+    if (req.usuario.rol === 'ADMIN' && contrato.sedeId !== req.usuario.sedeId) {
+      return res.status(403).json({ error: 'No tienes acceso a este contrato' });
+    }
+
+    const actualizado = await prisma.contrato.update({
+      where: { numero: req.params.numero },
+      data:  { ipWan, mascara, gateway },
+    });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario.id,
+        accion:     'GUARDAR_WAN_CONTRATO',
+        tabla:      'contratos',
+        registroId: contrato.numero,
+        detalles:   { ipWan, mascara, gateway },
+        ip:         req.ip,
+      },
+    });
+
+    res.json({
+      mensaje:  'WAN del contrato guardada',
+      contrato: actualizado,
+    });
+  } catch (err) { next(err); }
+};
+
+// ── Multer Excel ──────────────────────────────────────────────
+const storageExcel = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '../../uploads/excel');
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `contratos-${Date.now()}.${file.originalname.split('.').pop()}`);
+  },
+});
+const uploadExcel = multer({
+  storage: storageExcel,
+  fileFilter: (req, file, cb) => {
+    const ext = file.originalname.split('.').pop().toLowerCase();
+    if (!['xls', 'xlsx'].includes(ext)) return cb(new Error('Solo Excel (.xls o .xlsx)'), false);
+    cb(null, true);
+  },
+  limits: { fileSize: 15 * 1024 * 1024 },
+}).single('excel');
+
+// ── POST /api/contratos/subir-excel ───────────────────────────
+// Lee el Excel y devuelve la previsualización (sin guardar nada).
+const subirExcel = async (req, res, next) => {
+  uploadExcel(req, res, async (err) => {
+    if (err)        return res.status(400).json({ error: err.message });
+    if (!req.file)  return res.status(400).json({ error: 'No se subió archivo' });
+    try {
+      const { contratos, errores } = parsearExcelContratos(req.file.path);
+      res.json({
+        archivo: req.file.filename,
+        total:   contratos.length,
+        errores,
+        contratos,
+      });
+    } catch (e) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+      res.status(422).json({ error: 'No se pudo leer el Excel: ' + e.message });
+    }
+  });
+};
+
+// ── POST /api/contratos/confirmar-excel ───────────────────────
+// Crea los contratos en la sede del usuario. Los que ya existen se actualizan.
+const confirmarExcel = async (req, res, next) => {
+  try {
+    const { contratos } = req.body;
+    if (!Array.isArray(contratos) || contratos.length === 0)
+      return res.status(400).json({ error: 'No hay contratos para importar' });
+
+    // El ADMIN importa a su sede. SUPERADMIN/NOC deben mandar sedeId.
+    const sedeId = req.usuario.rol === 'ADMIN'
+      ? req.usuario.sedeId
+      : req.body.sedeId;
+
+    if (!sedeId)
+      return res.status(400).json({ error: 'No se pudo determinar la sede de destino' });
+
+    const sede = await prisma.sede.findUnique({ where: { id: sedeId } });
+    if (!sede) return res.status(404).json({ error: 'Sede no encontrada' });
+
+    const resultados = { creados: 0, actualizados: 0, errores: [] };
+
+    for (const c of contratos) {
+      try {
+        if (!c.numero || !c.abonado || !c.direccion) {
+          resultados.errores.push({ numero: c.numero || '?', error: 'Datos incompletos' });
+          continue;
+        }
+
+        const existe = await prisma.contrato.findUnique({ where: { numero: c.numero } });
+
+        await prisma.contrato.upsert({
+          where:  { numero: c.numero },
+          create: {
+            numero:       c.numero,
+            abonado:      c.abonado,
+            dni:          c.dni        || null,
+            celular:      c.celular    || null,
+            direccion:    c.direccion,
+            referencia:   c.referencia || null,
+            sector:       c.sector     || null,
+            tipoServicio: c.tipoServicio || null,
+            sedeId,
+          },
+          update: {
+            abonado:      c.abonado,
+            direccion:    c.direccion,
+            ...(c.dni          && { dni:          c.dni }),
+            ...(c.celular      && { celular:      c.celular }),
+            ...(c.referencia   && { referencia:   c.referencia }),
+            ...(c.sector       && { sector:       c.sector }),
+            ...(c.tipoServicio && { tipoServicio: c.tipoServicio }),
+            // sedeId NO se actualiza — el contrato vive en la sede que lo creó
+          },
+        });
+
+        if (existe) resultados.actualizados++;
+        else        resultados.creados++;
+      } catch (e) {
+        resultados.errores.push({ numero: c.numero, error: e.message });
+      }
+    }
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId: req.usuario.id,
+        accion:    'IMPORTAR_CONTRATOS_EXCEL',
+        detalles:  resultados,
+        ip:        req.ip,
+      },
+    });
+
+    res.json(resultados);
+  } catch (err) { next(err); }
+};
+
+module.exports = { listar, obtener, mapa, guardarWan, subirExcel, confirmarExcel };
