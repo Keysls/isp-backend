@@ -4,12 +4,10 @@ const path    = require('path');
 const fs      = require('fs');
 const { autorizarConReintentos } = require('./olt/onu-autorizacion.service');
 
-const TIPOS_QUE_AUTORIZAN_OLT = [
-  'INSTALACION_I',   // ONU nueva
-  'CAMBIO_EQUIPO_I', // Cambian el equipo físico
-  'RECONEXION_I',    // Reconectan una ONU
-  'TRASLADO_I',      // Mueven la ONU a otro domicilio
-];
+const { TIPOS_AUTORIZAN_OLT } = require('../utils/tipoOrden');
+// Alias local para no cambiar el resto del código
+const TIPOS_QUE_AUTORIZAN_OLT = TIPOS_AUTORIZAN_OLT;
+// Contiene: INSTALACION_I/D, CAMBIO_EQUIPO_I/D, RECONEXION_I/D, TRASLADO_I/D
 
 const TIPOS_FOTO_VALIDOS = ['FOTO_1', 'FOTO_2', 'FOTO_3', 'CAJA_NAP', 'POTENCIA', 'INSTALACION_FINAL', 'OTROS'];
 

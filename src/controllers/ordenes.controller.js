@@ -5,28 +5,27 @@ const path    = require('path');
 const fs      = require('fs');
 
 const { notificarOrdenPendienteWan } = require('../services/notificaciones.service');
+const {
+  TIPOS_INTERNET, TIPOS_CABLE, TIPOS_DUO,
+  TIPOS_NOC_TECNICO, TIPOS_SOLO_NOC,
+} = require('../utils/tipoOrden');
 
-// Tipos que el NOC PUEDE completar opcionalmente (sin necesidad de técnico)
-// Estas órdenes pueden ir por el flujo del técnico O ser cerradas remotamente
-const TIPOS_NOC_OPCIONAL = ['RECONEXION_I'];
+// Tipos que el NOC PUEDE completar opcionalmente (sin técnico)
+const TIPOS_NOC_OPCIONAL = ['RECONEXION_I', 'RECONEXION_D'];
 
 // ── Constantes de flujo ───────────────────────────────────────
-
-const TIPOS_NOC_TECNICO = [
-  'INSTALACION_I', 'RECONEXION_I', 'AVERIA_I',
-  'CAMBIO_EQUIPO_I', 'CAMBIO_DOMICILIO_I', 'TRASLADO_I',
-];
-
+// TIPOS_NOC_TECNICO y TIPOS_SOLO_NOC ya vienen de tipoOrden.js (incluyen _D)
 
 const TIPOS_NOC_COMPLETA = [
   'CORTE_DEUDA_I', 'CORTE_SOLICITUD_I',
   'CAMBIO_TITULAR_I', 'CAMBIO_PLAN_I', 'CAMBIO_CONTRASENA_I',
   'ALTA_SERVICIO_I', 'BAJA_SERVICIO_I', 'ATENCION_NOC_I',
+  'CORTE_DEUDA_D', 'CORTE_SOLICITUD_D',
+  'CAMBIO_TITULAR_D', 'CAMBIO_PLAN_D',
+  'ALTA_SERVICIO_D', 'BAJA_SERVICIO_D',
 ];
 
-const TIPOS_NOC      = [...TIPOS_NOC_TECNICO, ...TIPOS_NOC_COMPLETA];
-const TIPOS_INTERNET = [...TIPOS_NOC, 'RETIRO_EQUIPO_I'];
-const TIPOS_SOLO_NOC = TIPOS_NOC_COMPLETA;
+const TIPOS_NOC = [...TIPOS_NOC_TECNICO, ...TIPOS_NOC_COMPLETA];
 
 // ── Máquina de estados de órdenes ─────────────────────────────
 const TRANSICIONES_ESTADO = {
@@ -79,15 +78,14 @@ const upsertContratoDesdeOrden = async (tx, orden, sedeId) => {
 
   const numero = String(orden.contrato).trim();
 
-  // Inferir tipoServicio del tipo de orden:
-  // - Tipos _I → INTERNET
-  // - Tipos _C → CABLE  (si los manejás)
-  // - Otro → null
+  // Inferir tipoServicio del tipo de orden
   const tipoServicio = orden.tipoOrden?.endsWith('_I')
     ? 'INTERNET'
     : orden.tipoOrden?.endsWith('_C')
       ? 'CABLE'
-      : null;
+      : orden.tipoOrden?.endsWith('_D')
+        ? 'DUO'
+        : null;
 
   await tx.contrato.upsert({
     where: { numero },
@@ -151,10 +149,22 @@ const listar = async (req, res, next) => {
         estado:  { in: ['PENDIENTE_TECNICO', 'ACEPTADA', 'EN_PROCESO', 'COMPLETADA'] },
       };
     } else if (esRolNoc(rol)) {
+      // Si el frontend manda `tipos` explícito lo respetamos.
+      // Si no, el NOC ve Internet + Dúo por defecto (ambos necesitan gestión WAN).
+      const tiposNoc = tipos
+        ? tipos.split(',')
+        : [...TIPOS_INTERNET, ...TIPOS_DUO];
       where = {
-        tipoOrden: { in: TIPOS_INTERNET },
-        ...(estado && { estado }),             // ← solo filtra si se pasa explícitamente
-        ...(sedeId && { sedeId }),
+        tipoOrden: { in: tiposNoc },
+        ...(estado    && { estado }),
+        ...(sedeId    && { sedeId }),
+        ...(tecnicoId && { tecnicoId }),
+        ...(search    && {
+          OR: [
+            { abonado:   { contains: search, mode: 'insensitive' } },
+            { nServicio: { contains: search } },
+          ],
+        }),
       };
     }else if (rol === 'ADMIN') {
       // Panel Admin: solo su sede
@@ -719,8 +729,8 @@ const stats = async (req, res, next) => {
     let filtro = {};
     if (esRolNoc(rol)) {
       filtro = {
-        tipoOrden: { in: TIPOS_INTERNET },
-        ...(sedeId && { sedeId }),          // ← aplica la sede si llega
+        tipoOrden: { in: [...TIPOS_INTERNET, ...TIPOS_DUO] },
+        ...(sedeId && { sedeId }),
       };
     } else if (rol === 'ADMIN') {
       filtro = { sedeId: miSede };
@@ -732,7 +742,7 @@ const stats = async (req, res, next) => {
     const [
       pendienteNoc, pendienteTecnico, aceptadas, enProceso,
       completadasHoy, totalTecnicos,
-      pendientesInternet, pendientesCable,        // ← NUEVOS
+      pendientesInternet, pendientesCable, pendientesDuo,
     ] = await Promise.all([
       prisma.ordenServicio.count({ where: { ...filtro, estado: 'PENDIENTE_NOC' } }),
       prisma.ordenServicio.count({ where: { ...filtro, estado: 'PENDIENTE_TECNICO' } }),
@@ -746,7 +756,7 @@ const stats = async (req, res, next) => {
         },
       }),
 
-      // NUEVO — pendientes de Internet (tipoOrden termina en _I)
+      // Pendientes de Internet (_I)
       prisma.ordenServicio.count({
         where: {
           ...filtro,
@@ -754,12 +764,20 @@ const stats = async (req, res, next) => {
           tipoOrden: { in: TIPOS_INTERNET },
         },
       }),
-      // NUEVO — pendientes de Cable (tipoOrden NO está en la lista de Internet)
+      // Pendientes de Cable (_C)
       prisma.ordenServicio.count({
         where: {
           ...filtro,
           estado:    { in: ESTADOS_PENDIENTE },
-          tipoOrden: { notIn: TIPOS_INTERNET },
+          tipoOrden: { in: TIPOS_CABLE },
+        },
+      }),
+      // Pendientes de Dúo (_D)
+      prisma.ordenServicio.count({
+        where: {
+          ...filtro,
+          estado:    { in: ESTADOS_PENDIENTE },
+          tipoOrden: { in: TIPOS_DUO },
         },
       }),
     ]);
@@ -777,7 +795,7 @@ const stats = async (req, res, next) => {
       pendienteNoc, pendienteTecnico, aceptadas, enProceso,
       completadasHoy, totalTecnicos,
       tiempoPromedioMin: tiempoPromedio,
-      pendientesInternet, pendientesCable,        // ← NUEVOS
+      pendientesInternet, pendientesCable, pendientesDuo,
     });
   } catch (err) { next(err); }
 };

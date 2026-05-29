@@ -1,27 +1,18 @@
 const prisma = require('../utils/prisma');
-const { TIPO_LABEL } = require('../utils/tipoOrden');
+const { TIPO_LABEL, TIPOS_INTERNET, TIPOS_CABLE, TIPOS_DUO, TIPOS_CORTE, TIPOS_BAJA, TIPOS_INSTALACION } = require('../utils/tipoOrden');
 const { parsearExcelContratos } = require('../services/excel.service');
 const multer = require('multer');
 const path   = require('path');
 const fs     = require('fs');
 
-// Tipos de órdenes de Internet (todas las que terminan en _I)
-const TIPOS_INTERNET = [
-  'INSTALACION_I',  'RECONEXION_I',     'AVERIA_I',          'CAMBIO_EQUIPO_I',
-  'CAMBIO_DOMICILIO_I', 'TRASLADO_I',   'CORTE_DEUDA_I',     'CORTE_SOLICITUD_I',
-  'CAMBIO_TITULAR_I', 'CAMBIO_PLAN_I',  'CAMBIO_CONTRASENA_I',
-  'ALTA_SERVICIO_I',  'BAJA_SERVICIO_I','ATENCION_NOC_I',    'RETIRO_EQUIPO_I',
-];
 // ── Helper: calcula el estado del contrato a partir de su historial ──
-const TIPOS_CORTE = ['CORTE_DEUDA_I', 'CORTE_DEUDA_C', 'CORTE_SOLICITUD_I', 'CORTE_SOLICITUD_C'];
-const TIPOS_BAJA  = ['BAJA_SERVICIO_I', 'BAJA_SERVICIO_C', 'RETIRO_EQUIPO_I', 'RETIRO_EQUIPO_C'];
 
 const calcularEstado = (ordenes) => {
   if (!ordenes || ordenes.length === 0) return 'SIN_ACTIVIDAD';
 
-  // ¿Hay una INSTALACION_I/C activa (no completada ni cancelada)?
+  // ¿Hay una INSTALACION activa (I, C o D) no completada ni cancelada?
   const enInstalacion = ordenes.some(o =>
-    (o.tipoOrden === 'INSTALACION_I' || o.tipoOrden === 'INSTALACION_C') &&
+    TIPOS_INSTALACION.includes(o.tipoOrden) &&
     o.estado !== 'COMPLETADA' && o.estado !== 'CANCELADA'
   );
   if (enInstalacion) return 'EN_INSTALACION';
@@ -63,8 +54,8 @@ const listar = async (req, res, next) => {
     }
 
 
-    // Filtro por tipo de servicio del contrato (INTERNET / CABLE)
-    if (tipoServicio === 'INTERNET' || tipoServicio === 'CABLE') {
+    // Filtro por tipo de servicio del contrato (INTERNET / CABLE / DUO)
+    if (['INTERNET', 'CABLE', 'DUO'].includes(tipoServicio)) {
       where.tipoServicio = tipoServicio;
     }
 
@@ -249,7 +240,9 @@ const mapa = async (req, res, next) => {
     if (servicio === 'internet') {
       where.ordenes = { some: { tipoOrden: { in: TIPOS_INTERNET } } };
     } else if (servicio === 'cable') {
-      where.ordenes = { some: { tipoOrden: { notIn: TIPOS_INTERNET } } };
+      where.ordenes = { some: { tipoOrden: { in: TIPOS_CABLE } } };
+    } else if (servicio === 'duo') {
+      where.ordenes = { some: { tipoOrden: { in: TIPOS_DUO } } };
     }
 
     const contratos = await prisma.contrato.findMany({
@@ -284,9 +277,11 @@ const mapa = async (req, res, next) => {
 
       // Determinar qué servicios tiene el contrato (para el badge del popup)
       const tieneInternet = c.ordenes.some(o => TIPOS_INTERNET.includes(o.tipoOrden));
-      const tieneCable    = c.ordenes.some(o => !TIPOS_INTERNET.includes(o.tipoOrden));
+      const tieneCable    = c.ordenes.some(o => TIPOS_CABLE.includes(o.tipoOrden));
+      const tieneDuo      = c.ordenes.some(o => TIPOS_DUO.includes(o.tipoOrden));
       let servicioLabel = 'Cable';
-      if (tieneInternet && tieneCable) servicioLabel = 'Duo';
+      if (tieneDuo)                    servicioLabel = 'Duo';
+      else if (tieneInternet && tieneCable) servicioLabel = 'Duo';
       else if (tieneInternet)          servicioLabel = 'Internet';
 
       puntos.push({
