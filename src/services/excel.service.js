@@ -76,7 +76,8 @@ function parsearExcelOrdenes(rutaArchivo) {
       celular:      celular    || '',
       observacion:  observacion || null,
       tipoOrden,
-      esInternet:   tipoOrden.endsWith('_I'),
+      esInternet: tipoOrden.endsWith('_I') || tipoOrden.endsWith('_D'),
+      esCable:    tipoOrden.endsWith('_C') || tipoOrden.endsWith('_D'),
     });
   }
 
@@ -120,27 +121,52 @@ function detectarTipo(servicio) {
                                       || s === 'SUPERVISION(C)')          return 'SUPERVISION_C';
   if (s === 'TRASLADO(C)')                                                 return 'TRASLADO_C';
 
+  // ── DÚO (Internet + Cable) ────────────────────────────────────
+  if (s === 'INSTALACION(D)'          || s === 'INSTALACIÓN(D)')          return 'INSTALACION_D';
+  if (s === 'ALTA DE SERVICIO(D)')                                         return 'ALTA_SERVICIO_D';
+  if (s === 'AVERIA(D)'               || s === 'AVERÍA(D)')               return 'AVERIA_D';
+  if (s === 'CAMBIO DE DOMICILIO(D)')                                      return 'CAMBIO_DOMICILIO_D';
+  if (s === 'CAMBIO DE EQUIPO(D)')                                         return 'CAMBIO_EQUIPO_D';
+  if (s === 'CAMBIO DE PLAN(D)')                                           return 'CAMBIO_PLAN_D';
+  if (s === 'CAMBIO DE TITULAR(D)')                                        return 'CAMBIO_TITULAR_D';
+  if (s === 'CORTE A SOLICITUD(D)')                                        return 'CORTE_SOLICITUD_D';
+  if (s === 'CORTE POR DEUDA(D)')                                          return 'CORTE_DEUDA_D';
+  if (s === 'RECONEXION(D)'           || s === 'RECONEXIÓN(D)')           return 'RECONEXION_D';
+  if (s === 'RETIRO DE EQUIPO(D)')                                         return 'RETIRO_EQUIPO_D';
+  if (s === 'TRASLADO(D)')                                                 return 'TRASLADO_D';
+  if (s === 'BAJA DE SERVICIO(D)')                                         return 'BAJA_SERVICIO_D';
+
   // ── Fallback por palabras clave ───────────────────────────────
   if (s.includes('INSTAL')    && s.includes('ANEXO') && s.includes('(C)')) return 'INSTALACION_ANEXO_C';
   if (s.includes('MIGRACI')   && s.includes('(C)'))  return 'MIGRACION_FTTH_C';
   if (s.includes('INSTAL')    && s.includes('(I)'))  return 'INSTALACION_I';
   if (s.includes('INSTAL')    && s.includes('(C)'))  return 'INSTALACION_C';
+  if (s.includes('INSTAL')    && s.includes('(D)'))  return 'INSTALACION_D';
   if (s.includes('CAMBIO')    && s.includes('EQUIPO') && s.includes('(I)')) return 'CAMBIO_EQUIPO_I';
+  if (s.includes('CAMBIO')    && s.includes('EQUIPO') && s.includes('(D)')) return 'CAMBIO_EQUIPO_D';
   if (s.includes('CAMBIO')    && s.includes('PLAN')  && s.includes('(I)')) return 'CAMBIO_PLAN_I';
   if (s.includes('CAMBIO')    && s.includes('PLAN')  && s.includes('(C)')) return 'CAMBIO_PLAN_C';
+  if (s.includes('CAMBIO')    && s.includes('PLAN')  && s.includes('(D)')) return 'CAMBIO_PLAN_D';
   if (s.includes('AVERI')     && s.includes('(I)'))  return 'AVERIA_I';
   if (s.includes('AVERI')     && s.includes('(C)'))  return 'AVERIA_C';
+  if (s.includes('AVERI')     && s.includes('(D)'))  return 'AVERIA_D';
   if (s.includes('RECONEX')   && s.includes('(I)'))  return 'RECONEXION_I';
   if (s.includes('RECONEX')   && s.includes('(C)'))  return 'RECONEXION_C';
+  if (s.includes('RECONEX')   && s.includes('(D)'))  return 'RECONEXION_D';
   if (s.includes('TRASLADO')  && s.includes('(I)'))  return 'TRASLADO_I';
   if (s.includes('TRASLADO')  && s.includes('(C)'))  return 'TRASLADO_C';
+  if (s.includes('TRASLADO')  && s.includes('(D)'))  return 'TRASLADO_D';
   if (s.includes('BAJA')      && s.includes('(I)'))  return 'BAJA_SERVICIO_I';
+  if (s.includes('BAJA')      && s.includes('(D)'))  return 'BAJA_SERVICIO_D';
   if (s.includes('ALTA')      && s.includes('(I)'))  return 'ALTA_SERVICIO_I';
   if (s.includes('ALTA')      && s.includes('(C)'))  return 'ALTA_SERVICIO_C';
+  if (s.includes('ALTA')      && s.includes('(D)'))  return 'ALTA_SERVICIO_D';
   if (s.includes('CORTE')     && s.includes('(I)'))  return 'CORTE_SOLICITUD_I';
   if (s.includes('CORTE')     && s.includes('(C)'))  return 'CORTE_SOLICITUD_C';
+  if (s.includes('CORTE')     && s.includes('(D)'))  return 'CORTE_SOLICITUD_D';
   if (s.includes('RETIRO')    && s.includes('(I)'))  return 'RETIRO_EQUIPO_I';
   if (s.includes('RETIRO')    && s.includes('(C)'))  return 'RETIRO_EQUIPO_C';
+  if (s.includes('RETIRO')    && s.includes('(D)'))  return 'RETIRO_EQUIPO_D';
   if (s.includes('NOC')       && s.includes('(I)'))  return 'ATENCION_NOC_I';
   if (s.includes('SUPERVI')   && s.includes('(C)'))  return 'SUPERVISION_C';
 
