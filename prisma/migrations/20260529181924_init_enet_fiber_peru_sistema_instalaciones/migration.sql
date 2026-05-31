@@ -2,7 +2,7 @@
 CREATE TYPE "Rol" AS ENUM ('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN', 'TECNICO');
 
 -- CreateEnum
-CREATE TYPE "TipoOrden" AS ENUM ('INSTALACION_I', 'ALTA_SERVICIO_I', 'ATENCION_NOC_I', 'AVERIA_I', 'BAJA_SERVICIO_I', 'CAMBIO_CONTRASENA_I', 'CAMBIO_DOMICILIO_I', 'CAMBIO_EQUIPO_I', 'CAMBIO_PLAN_I', 'CAMBIO_TITULAR_I', 'CORTE_SOLICITUD_I', 'CORTE_DEUDA_I', 'RECONEXION_I', 'RETIRO_EQUIPO_I', 'TRASLADO_I', 'INSTALACION_C', 'ALTA_SERVICIO_C', 'AVERIA_C', 'CAMBIO_DOMICILIO_C', 'CAMBIO_PLAN_C', 'CAMBIO_TITULAR_C', 'CORTE_SOLICITUD_C', 'CORTE_DEUDA_C', 'INSTALACION_ANEXO_C', 'MIGRACION_FTTH_C', 'RECONEXION_C', 'RETIRO_EQUIPO_C', 'SUPERVISION_C', 'TRASLADO_C');
+CREATE TYPE "TipoOrden" AS ENUM ('INSTALACION_I', 'ALTA_SERVICIO_I', 'ATENCION_NOC_I', 'AVERIA_I', 'BAJA_SERVICIO_I', 'CAMBIO_CONTRASENA_I', 'CAMBIO_DOMICILIO_I', 'CAMBIO_EQUIPO_I', 'CAMBIO_PLAN_I', 'CAMBIO_TITULAR_I', 'CORTE_SOLICITUD_I', 'CORTE_DEUDA_I', 'RECONEXION_I', 'RETIRO_EQUIPO_I', 'TRASLADO_I', 'INSTALACION_C', 'ALTA_SERVICIO_C', 'AVERIA_C', 'CAMBIO_DOMICILIO_C', 'CAMBIO_PLAN_C', 'CAMBIO_TITULAR_C', 'CORTE_SOLICITUD_C', 'CORTE_DEUDA_C', 'INSTALACION_ANEXO_C', 'MIGRACION_FTTH_C', 'RECONEXION_C', 'RETIRO_EQUIPO_C', 'SUPERVISION_C', 'TRASLADO_C', 'INSTALACION_D', 'ALTA_SERVICIO_D', 'AVERIA_D', 'BAJA_SERVICIO_D', 'CAMBIO_DOMICILIO_D', 'CAMBIO_EQUIPO_D', 'CAMBIO_PLAN_D', 'CAMBIO_TITULAR_D', 'CORTE_SOLICITUD_D', 'CORTE_DEUDA_D', 'RECONEXION_D', 'RETIRO_EQUIPO_D', 'TRASLADO_D');
 
 -- CreateEnum
 CREATE TYPE "EstadoOrden" AS ENUM ('PENDIENTE_NOC', 'PENDIENTE_TECNICO', 'ACEPTADA', 'EN_PROCESO', 'COMPLETADA', 'CANCELADA', 'REPROGRAMADA');
@@ -18,6 +18,9 @@ CREATE TYPE "EstadoPuntoRed" AS ENUM ('ACTIVA', 'SATURADA', 'MANTENIMIENTO');
 
 -- CreateEnum
 CREATE TYPE "TipoServicio" AS ENUM ('INTERNET', 'CABLE', 'DUO');
+
+-- CreateEnum
+CREATE TYPE "TipoNotificacion" AS ENUM ('ORDEN_PENDIENTE_WAN', 'ONU_ERROR_OLT');
 
 -- CreateTable
 CREATE TABLE "sedes" (
@@ -298,6 +301,24 @@ CREATE TABLE "puntos_red" (
     CONSTRAINT "puntos_red_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "notificaciones" (
+    "id" TEXT NOT NULL,
+    "tipo" "TipoNotificacion" NOT NULL,
+    "titulo" TEXT NOT NULL,
+    "detalle" TEXT,
+    "link" TEXT,
+    "sedeId" TEXT,
+    "ordenId" TEXT,
+    "configOnuId" TEXT,
+    "leida" BOOLEAN NOT NULL DEFAULT false,
+    "leidaEn" TIMESTAMP(3),
+    "leidaPor" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "notificaciones_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "usuarios_email_key" ON "usuarios"("email");
 
@@ -348,6 +369,18 @@ CREATE UNIQUE INDEX "puntos_red_codigo_key" ON "puntos_red"("codigo");
 
 -- CreateIndex
 CREATE INDEX "puntos_red_sedeId_idx" ON "puntos_red"("sedeId");
+
+-- CreateIndex
+CREATE INDEX "notificaciones_leida_createdAt_idx" ON "notificaciones"("leida", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "notificaciones_sedeId_idx" ON "notificaciones"("sedeId");
+
+-- CreateIndex
+CREATE INDEX "notificaciones_ordenId_idx" ON "notificaciones"("ordenId");
+
+-- CreateIndex
+CREATE INDEX "notificaciones_configOnuId_idx" ON "notificaciones"("configOnuId");
 
 -- AddForeignKey
 ALTER TABLE "usuarios" ADD CONSTRAINT "usuarios_sedeId_fkey" FOREIGN KEY ("sedeId") REFERENCES "sedes"("id") ON DELETE SET NULL ON UPDATE CASCADE;

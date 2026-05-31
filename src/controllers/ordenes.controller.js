@@ -499,11 +499,16 @@ const asignar = async (req, res, next) => {
         ? await wanHeredableDelContrato(tx, ordenActual.contrato, ordenActual.tipoOrden, true)
         : null;
 
-      // Estado: si hereda WAN → PENDIENTE_TECNICO directo
+      // Estado final:
+      // 1. Si ya tiene WAN propia → PENDIENTE_TECNICO (solo cambió el técnico)
+      // 2. Si hereda WAN del contrato → PENDIENTE_TECNICO
+      // 3. Si necesita WAN y no tiene → PENDIENTE_NOC
+      // 4. Si no necesita WAN (cable, cortes, etc.) → PENDIENTE_TECNICO
+      const yaTeníaWan = !!ordenActual.ipWan;
       const estadoBase = TIPOS_NOC.includes(ordenActual.tipoOrden)
         ? 'PENDIENTE_NOC'
         : 'PENDIENTE_TECNICO';
-      const estadoFinal = wanHeredada ? 'PENDIENTE_TECNICO' : estadoBase;
+      const estadoFinal = (yaTeníaWan || wanHeredada) ? 'PENDIENTE_TECNICO' : estadoBase;
 
       return tx.ordenServicio.update({
         where: { id: req.params.id },

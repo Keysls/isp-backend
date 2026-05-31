@@ -55,8 +55,14 @@ const listar = async (req, res, next) => {
 
 
     // Filtro por tipo de servicio del contrato (INTERNET / CABLE / DUO)
-    if (['INTERNET', 'CABLE', 'DUO'].includes(tipoServicio)) {
-      where.tipoServicio = tipoServicio;
+    if (tipoServicio) {
+      // Acepta valor único ('INTERNET') o múltiples separados por coma ('INTERNET,DUO')
+      const tipos = tipoServicio.split(',').filter(t => ['INTERNET', 'CABLE', 'DUO'].includes(t));
+      if (tipos.length === 1) {
+        where.tipoServicio = tipos[0];
+      } else if (tipos.length > 1) {
+        where.tipoServicio = { in: tipos };
+      }
     }
 
     // Filtro NOC: solo contratos con al menos una orden de Internet
