@@ -340,6 +340,26 @@ const completar = async (req, res, next) => {
         where: { id: instalacion.ordenId },
         data:  { estado: 'COMPLETADA', fechaFin: ahora, tiempoInstalacion },
       });
+
+      // ── Copiar GPS al contrato si aún no tiene ubicación ──────
+      // Solo si la instalación tiene coordenadas y la orden tiene contrato
+      if (
+        instalacion.latitud  != null &&
+        instalacion.longitud != null &&
+        instalacion.orden.contrato
+      ) {
+        await tx.contrato.updateMany({
+          where: {
+            numero:  instalacion.orden.contrato,
+            latitud: null,   // solo si no tiene ya
+          },
+          data: {
+            latitud:  instalacion.latitud,
+            longitud: instalacion.longitud,
+          },
+        });
+      }
+
       return inst;
     });
 

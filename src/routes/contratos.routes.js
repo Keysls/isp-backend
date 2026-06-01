@@ -8,7 +8,8 @@ router.get('/',                requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC')
 router.get('/mapa',            requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.mapa);
 router.post('/subir-excel',    requireRol('SUPERADMIN', 'ADMIN'),                 ctrl.subirExcel);
 router.post('/confirmar-excel',requireRol('SUPERADMIN', 'ADMIN'),                 ctrl.confirmarExcel);
-router.patch('/:numero/wan',   requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.guardarWan);
+router.patch('/:numero/wan',       requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.guardarWan);
+router.patch('/:numero/ubicacion', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC', 'TECNICO'), ctrl.actualizarUbicacion);
 router.get('/:numero',         requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.obtener);
 
 module.exports = router;

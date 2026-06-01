@@ -84,6 +84,8 @@ model Contrato {
   ipWan      String?                                     // ← WAN del contrato
   mascara    String?                                     // ← se hereda a las órdenes nuevas
   gateway    String?
+  latitud    Float?                                      // ← ubicación del cliente
+  longitud   Float?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   sede       Sede            @relation(fields: [sedeId], references: [id])

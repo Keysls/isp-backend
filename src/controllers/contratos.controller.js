@@ -477,4 +477,44 @@ const confirmarExcel = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { listar, obtener, mapa, guardarWan, subirExcel, confirmarExcel };
+
+// ── PATCH /api/contratos/:numero/ubicacion ───────────────────
+// Permite al técnico (o admin) actualizar la ubicación GPS del contrato
+const actualizarUbicacion = async (req, res, next) => {
+  try {
+    const { latitud, longitud } = req.body;
+    if (latitud == null || longitud == null)
+      return res.status(400).json({ error: 'latitud y longitud son requeridas' });
+
+    const lat = parseFloat(latitud);
+    const lng = parseFloat(longitud);
+    if (isNaN(lat) || isNaN(lng))
+      return res.status(400).json({ error: 'Coordenadas inválidas' });
+
+    const contrato = await prisma.contrato.findUnique({
+      where: { numero: req.params.numero },
+    });
+    if (!contrato) return res.status(404).json({ error: 'Contrato no encontrado' });
+
+    const actualizado = await prisma.contrato.update({
+      where: { numero: req.params.numero },
+      data:  { latitud: lat, longitud: lng },
+    });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario.id,
+        accion:     'ACTUALIZAR_UBICACION_CONTRATO',
+        tabla:      'contratos',
+        registroId: contrato.numero,
+        detalles:   { latitud: lat, longitud: lng },
+        ip:         req.ip,
+      },
+    });
+
+    res.json({ numero: actualizado.numero, latitud: actualizado.latitud, longitud: actualizado.longitud });
+  } catch (err) { next(err); }
+};
+
+module.exports = {
+  actualizarUbicacion, listar, obtener, mapa, guardarWan, subirExcel, confirmarExcel };
