@@ -1,4 +1,3 @@
-
 process.env.OPENSSL_CONF = '/dev/null';
 const express = require('express');
 const cors    = require('cors');
@@ -20,8 +19,12 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
-// Archivos estáticos
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Archivos estáticos — con CORS explícito para que las imágenes carguen en el panel
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(path.join(__dirname, '../uploads')));
 
 // ─── Rutas ─────────────────────────────────────────────────────
 app.use('/api/auth',            require('./routes/auth.routes'));

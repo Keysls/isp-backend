@@ -86,6 +86,7 @@ model Contrato {
   gateway    String?
   latitud    Float?                                      // ← ubicación del cliente
   longitud   Float?
+  precinto   String?                                     // ← número de precinto en NAP/CTO
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   sede       Sede            @relation(fields: [sedeId], references: [id])

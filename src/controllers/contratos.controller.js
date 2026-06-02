@@ -516,5 +516,28 @@ const actualizarUbicacion = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+
+// ── PATCH /api/contratos/:numero/precinto ────────────────────
+const actualizarPrecinto = async (req, res, next) => {
+  try {
+    const { precinto } = req.body;
+    if (precinto === undefined)
+      return res.status(400).json({ error: 'precinto es requerido' });
+
+    const contrato = await prisma.contrato.findUnique({
+      where: { numero: req.params.numero },
+    });
+    if (!contrato) return res.status(404).json({ error: 'Contrato no encontrado' });
+
+    const actualizado = await prisma.contrato.update({
+      where: { numero: req.params.numero },
+      data:  { precinto: precinto || null },
+    });
+
+    res.json({ numero: actualizado.numero, precinto: actualizado.precinto });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
-  actualizarUbicacion, listar, obtener, mapa, guardarWan, subirExcel, confirmarExcel };
+  actualizarUbicacion,
+  actualizarPrecinto, listar, obtener, mapa, guardarWan, subirExcel, confirmarExcel };

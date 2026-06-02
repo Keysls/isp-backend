@@ -273,7 +273,7 @@ const obtener = async (req, res, next) => {
         tecnico:     { include: { usuario: { select: { nombre: true, apellido: true, telefono: true, email: true } } } },
         instalacion: { include: { configOnu: true, fotos: true } },
         sede:        { select: { id: true, nombre: true, ciudad: true } },
-        contratoRef: { select: { numero: true, latitud: true, longitud: true, tipoServicio: true } },
+        contratoRef: { select: { numero: true, latitud: true, longitud: true, tipoServicio: true, precinto: true } },
       },
     });
     if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
