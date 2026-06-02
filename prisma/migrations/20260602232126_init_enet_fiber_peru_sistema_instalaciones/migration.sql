@@ -95,6 +95,7 @@ CREATE TABLE "contratos" (
     "gateway" TEXT,
     "latitud" DOUBLE PRECISION,
     "longitud" DOUBLE PRECISION,
+    "precinto" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
