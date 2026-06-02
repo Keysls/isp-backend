@@ -9,7 +9,9 @@ const { TIPOS_AUTORIZAN_OLT } = require('../utils/tipoOrden');
 const TIPOS_QUE_AUTORIZAN_OLT = TIPOS_AUTORIZAN_OLT;
 // Contiene: INSTALACION_I/D, CAMBIO_EQUIPO_I/D, RECONEXION_I/D, TRASLADO_I/D
 
-const TIPOS_FOTO_VALIDOS = ['FOTO_1', 'FOTO_2', 'FOTO_3', 'CAJA_NAP', 'POTENCIA', 'INSTALACION_FINAL', 'OTROS'];
+// Tipos de foto: FOTO_1..FOTO_8 o cualquier string libre (sin validación rígida)
+const MAX_FOTOS = 8;
+const MIN_FOTOS = 1;
 
 // ── Multer fotos ──────────────────────────────────────────────
 const storageFotos = multer.diskStorage({
@@ -30,8 +32,8 @@ const uploadFotos = multer({
     if (!tipos.includes(file.mimetype)) return cb(new Error('Solo JPEG, PNG o WebP'), false);
     cb(null, true);
   },
-  limits: { fileSize: 15 * 1024 * 1024, files: 10 },
-}).array('fotos', 10);
+  limits: { fileSize: 15 * 1024 * 1024, files: MAX_FOTOS },
+}).array('fotos', MAX_FOTOS);
 
 // ── POST /api/instalaciones/iniciar/:ordenId ──────────────────
 const iniciar = async (req, res, next) => {
@@ -130,34 +132,14 @@ const subirFotos = async (req, res, next) => {
       if (err)                   return res.status(400).json({ error: err.message });
       if (!req.files?.length)    return res.status(400).json({ error: 'No se subieron fotos' });
 
-      const tipos = (req.body.tipos || '').split(',').map(t => t.trim()).filter(Boolean);
+      // Generar tipos automáticos si no se envían (FOTO_1, FOTO_2, ...)
+      const tiposRaw = (req.body.tipos || '').split(',').map(t => t.trim()).filter(Boolean);
+      const tipos = req.files.map((_, i) => tiposRaw[i] || `FOTO_${i + 1}`);
 
-      // Validación 1: misma cantidad de tipos que de archivos
-      if (tipos.length !== req.files.length) {
+      // Validación: máximo MAX_FOTOS fotos
+      if (req.files.length > MAX_FOTOS) {
         limpiar();
-        return res.status(400).json({
-          error: `Cantidad de tipos (${tipos.length}) no coincide con cantidad de archivos (${req.files.length}). Enviá un tipo por cada foto en el mismo orden.`,
-          ejemplo: 'tipos=FOTO_1,CAJA_NAP,POTENCIA',
-        });
-      }
-
-      // Validación 2: tipos deben ser válidos
-      const invalidos = tipos.filter(t => !TIPOS_FOTO_VALIDOS.includes(t));
-      if (invalidos.length > 0) {
-        limpiar();
-        return res.status(400).json({
-          error: `Tipos de foto inválidos: ${invalidos.join(', ')}`,
-          validos: TIPOS_FOTO_VALIDOS,
-        });
-      }
-
-      // Validación 3: no permitir tipos duplicados (salvo OTROS)
-      const noOtros = tipos.filter(t => t !== 'OTROS');
-      if (new Set(noOtros).size !== noOtros.length) {
-        limpiar();
-        return res.status(400).json({
-          error: 'No puedes subir dos fotos con el mismo tipo (excepto OTROS)',
-        });
+        return res.status(400).json({ error: `Máximo ${MAX_FOTOS} fotos por instalación` });
       }
 
       // Guardar todo en transacción — si una falla, ninguna queda

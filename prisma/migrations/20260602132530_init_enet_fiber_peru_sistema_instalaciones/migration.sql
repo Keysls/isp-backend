@@ -93,6 +93,8 @@ CREATE TABLE "contratos" (
     "ipWan" TEXT,
     "mascara" TEXT,
     "gateway" TEXT,
+    "latitud" DOUBLE PRECISION,
+    "longitud" DOUBLE PRECISION,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
