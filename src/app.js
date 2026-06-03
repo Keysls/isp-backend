@@ -26,6 +26,18 @@ app.use('/uploads', (req, res, next) => {
   next();
 }, express.static(path.join(__dirname, '../uploads')));
 
+
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+
+// ─── Sin caché para todas las rutas API ────────────────────────
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
+
 // ─── Rutas ─────────────────────────────────────────────────────
 app.use('/api/auth',            require('./routes/auth.routes'));
 app.use('/api/usuarios',        require('./routes/usuarios.routes'));
@@ -37,6 +49,11 @@ app.use('/api/olt',             require('./routes/olt/olt.routes'));
 app.use('/api/contratos',       require('./routes/contratos.routes'));
 app.use('/api/puntos-red',      require('./routes/puntosRed.routes'));
 app.use('/api/notificaciones',  require('./routes/notificaciones.routes'));
+// ─── Rutas de inventario ────────────────────────────────────────
+app.use('/api/productos',       require('./routes/productos.routes'));
+app.use('/api/stock',           require('./routes/stock.routes'));
+app.use('/api/onus',            require('./routes/onus.routes'));
+app.use('/api/activos',         require('./routes/activos.routes'));
 
 // ─── Health check ──────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
@@ -54,6 +71,14 @@ app.use((err, req, res, next) => {
     error: err.message || 'Error interno del servidor',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('UNHANDLED REJECTION:', err);
 });
 
 // ─── Servidor ──────────────────────────────────────────────────

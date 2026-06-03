@@ -7,18 +7,38 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─────────────────────────────────────────────
+// CORE
+// ─────────────────────────────────────────────
+
 model Sede {
-  id        String          @id @default(uuid())
-  nombre    String
-  ciudad    String
-  activo    Boolean         @default(true)
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  olts      Olt[]
-  ordenes   OrdenServicio[]
-  usuarios  Usuario[]
-  contratos Contrato[]
-  puntosRed PuntoRed[]                        // ← NUEVO
+  id               String          @id @default(uuid())
+  nombre           String
+  ciudad           String
+  activo           Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  direccion        String?
+  esPrincipal      Boolean         @default(false) @map("es_principal")
+  puedeEnviarStock Boolean         @default(false) @map("puede_enviar_stock")
+
+  // relaciones NOC
+  olts               Olt[]
+  ordenes            OrdenServicio[]
+  usuarios           Usuario[]
+  contratos          Contrato[]
+  puntosRed          PuntoRed[]
+
+  // relaciones inventario
+  activos            Activo[]
+  asignaciones       AsignacionTecnico[]
+  envios             Envio[]             @relation("EnvioDestino")
+  enviosOrigen       Envio[]             @relation("EnvioOrigen")
+  onusList           Onu[]
+  onusRecicladas     OnuReciclada[]
+  salidasDirectas    SalidaDirecta[]
+  stockSedes         StockSede[]
+  stockSedeVariantes StockSedeVariante[]
 
   @@map("sedes")
 }
@@ -54,6 +74,12 @@ model Tecnico {
   ordenes      OrdenServicio[]
   usuario      Usuario         @relation(fields: [usuarioId], references: [id])
 
+  // relaciones inventario
+  asignaciones   AsignacionTecnico[]
+  consumos       ConsumoTecnico[]
+  entregas       EntregaTecnico[]
+  onusAsignadas  Onu[]
+
   @@map("tecnicos")
 }
 
@@ -71,26 +97,30 @@ model TokenSesion {
   @@map("tokens_sesion")
 }
 
+// ─────────────────────────────────────────────
+// CONTRATOS Y ÓRDENES
+// ─────────────────────────────────────────────
+
 model Contrato {
-  numero     String   @id                                // "C00000006163"
-  abonado    String
-  dni        String?
-  celular    String?
-  direccion  String
-  referencia String?
-  sector     String?
-  sedeId     String
-  tipoServicio TipoServicio? 
-  ipWan      String?                                     // ← WAN del contrato
-  mascara    String?                                     // ← se hereda a las órdenes nuevas
-  gateway    String?
-  latitud    Float?                                      // ← ubicación del cliente
-  longitud   Float?
-  precinto   String?                                     // ← número de precinto en NAP/CTO
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  sede       Sede            @relation(fields: [sedeId], references: [id])
-  ordenes    OrdenServicio[]
+  numero       String        @id
+  abonado      String
+  dni          String?
+  celular      String?
+  direccion    String
+  referencia   String?
+  sector       String?
+  sedeId       String
+  tipoServicio TipoServicio?
+  ipWan        String?
+  mascara      String?
+  gateway      String?
+  latitud      Float?
+  longitud     Float?
+  precinto     String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sede         Sede          @relation(fields: [sedeId], references: [id])
+  ordenes      OrdenServicio[]
 
   @@index([sedeId])
   @@index([dni])
@@ -103,7 +133,7 @@ model OrdenServicio {
   tipoOrden         TipoOrden
   estado            EstadoOrden  @default(PENDIENTE_NOC)
   fechaServicio     DateTime
-  contrato          String?      // FK al numero de Contrato (se mantiene el nombre para no romper código existente)
+  contrato          String?
   contratoRef       Contrato?    @relation(fields: [contrato], references: [numero])
   pdfOriginalUrl    String?
   sedeId            String?
@@ -131,9 +161,13 @@ model OrdenServicio {
   sede              Sede?        @relation(fields: [sedeId], references: [id])
   tecnico           Tecnico?     @relation(fields: [tecnicoId], references: [id])
 
-  @@map("ordenes_servicio")
   @@index([contrato])
+  @@map("ordenes_servicio")
 }
+
+// ─────────────────────────────────────────────
+// INSTALACIONES / CONFIG ONU
+// ─────────────────────────────────────────────
 
 model Instalacion {
   id                   String            @id @default(uuid())
@@ -228,6 +262,10 @@ model ModeloOnu {
   @@map("modelos_onu")
 }
 
+// ─────────────────────────────────────────────
+// OLT
+// ─────────────────────────────────────────────
+
 model OltFabricante {
   id        Int         @id @default(autoincrement())
   nombre    String      @unique @db.VarChar(100)
@@ -276,9 +314,307 @@ model Olt {
   modelo            OltModelo     @relation(fields: [modeloId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   sede              Sede          @relation(fields: [sedeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@unique([direccionIp, puertoSsh]) 
+  @@unique([direccionIp, puertoSsh])
   @@map("olts")
 }
+
+// ─────────────────────────────────────────────
+// RED
+// ─────────────────────────────────────────────
+
+model PuntoRed {
+  id        String         @id @default(uuid())
+  tipo      TipoPuntoRed
+  codigo    String         @unique
+  latitud   Float
+  longitud  Float
+  capacidad Int?
+  ocupados  Int            @default(0)
+  estado    EstadoPuntoRed @default(ACTIVA)
+  sedeId    String
+  direccion String?
+  notas     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  sede      Sede           @relation(fields: [sedeId], references: [id])
+
+  @@index([sedeId])
+  @@map("puntos_red")
+}
+
+// ─────────────────────────────────────────────
+// NOTIFICACIONES
+// ─────────────────────────────────────────────
+
+model Notificacion {
+  id          String           @id @default(uuid())
+  tipo        TipoNotificacion
+  titulo      String
+  detalle     String?
+  link        String?
+  sedeId      String?
+  ordenId     String?
+  configOnuId String?
+  leida       Boolean          @default(false)
+  leidaEn     DateTime?
+  leidaPor    String?
+  createdAt   DateTime         @default(now())
+
+  @@index([leida, createdAt])
+  @@index([sedeId])
+  @@index([ordenId])
+  @@index([configOnuId])
+  @@map("notificaciones")
+}
+
+// ─────────────────────────────────────────────
+// INVENTARIO
+// ─────────────────────────────────────────────
+
+model Producto {
+  id                Int                 @id @default(autoincrement())
+  nombre            String
+  descripcion       String?
+  stockTotal        Int                 @default(0) @map("stock_total")
+  estado            Boolean             @default(true)
+  createdAt         DateTime?           @default(now()) @map("created_at")
+  codigo            String?
+  categoria         String?
+  unidad            String?
+  stockMinimo       Int                 @default(0) @map("stock_minimo")
+  esMedible         Boolean             @default(false) @map("es_medible")
+  metrosPorUnidad   Int?                @map("metros_por_unidad")
+  metrosDisponibles Int?                @map("metros_disponibles")
+  tieneVariantes    Boolean             @default(false) @map("tiene_variantes")
+  asignaciones      AsignacionTecnico[]
+  consumos          ConsumoTecnico[]
+  entradasStock     EntradaStock[]
+  entregas          EntregaTecnico[]
+  envioDetalles     EnvioDetalle[]
+  onusList          Onu[]
+  variantes         ProductoVariante[]
+  salidasDirectas   SalidaDirecta[]
+  stockSedes        StockSede[]
+
+  @@map("productos")
+}
+
+model ProductoVariante {
+  id            Int                 @id @default(autoincrement())
+  productoId    Int                 @map("producto_id")
+  talla         String?
+  genero        String?
+  stockTotal    Int                 @default(0) @map("stock_total")
+  stockMinimo   Int                 @default(0) @map("stock_minimo")
+  codigo        String?
+  estado        Boolean             @default(true)
+  envioDetalles EnvioDetalle[]
+  producto      Producto            @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  stockSedes    StockSedeVariante[]
+
+  @@map("producto_variantes")
+}
+
+model StockSede {
+  id         Int      @id @default(autoincrement())
+  sedeId     String   @map("sede_id")
+  productoId Int      @map("producto_id")
+  cantidad   Int      @default(0)
+  producto   Producto @relation(fields: [productoId], references: [id])
+  sede       Sede     @relation(fields: [sedeId], references: [id])
+
+  @@unique([sedeId, productoId])
+  @@map("stock_sede")
+}
+
+model StockSedeVariante {
+  id         Int              @id @default(autoincrement())
+  varianteId Int              @map("variante_id")
+  sedeId     String           @map("sede_id")
+  cantidad   Int              @default(0)
+  sede       Sede             @relation(fields: [sedeId], references: [id])
+  variante   ProductoVariante @relation(fields: [varianteId], references: [id], onDelete: Cascade)
+
+  @@unique([varianteId, sedeId])
+  @@map("stock_sede_variante")
+}
+
+model EntradaStock {
+  id            Int      @id @default(autoincrement())
+  productoId    Int      @map("producto_id")
+  cantidad      Int
+  fecha         DateTime @default(now())
+  registradoPor String?  @map("registrado_por")
+  guia          String?
+  sedeId        String?  @map("sede_id")
+  comentario    String?
+  producto      Producto @relation(fields: [productoId], references: [id])
+
+  @@map("entradas_stock")
+}
+
+model Envio {
+  id                Int            @id @default(autoincrement())
+  sedeId            String         @map("sede_id")
+  usuarioId         String         @map("usuario_id") @db.VarChar(36)
+  guia              String
+  comentario        String?
+  fechaEnvio        DateTime       @map("fecha_envio")
+  createdAt         DateTime?      @default(now()) @map("created_at")
+  sedeOrigenId      String?        @map("sede_origen_id")
+  estado            String         @default("PENDIENTE")
+  fechaConfirmacion DateTime?      @map("fecha_confirmacion")
+  motivoCancelacion String?        @map("motivo_cancelacion")
+  detalles          EnvioDetalle[]
+  sede              Sede           @relation("EnvioDestino", fields: [sedeId], references: [id])
+  sedeOrigen        Sede?          @relation("EnvioOrigen", fields: [sedeOrigenId], references: [id])
+
+  @@map("envios")
+}
+
+model EnvioDetalle {
+  id         Int               @id @default(autoincrement())
+  envioId    Int               @map("envio_id")
+  productoId Int               @map("producto_id")
+  cantidad   Int
+  varianteId Int?              @map("variante_id")
+  envio      Envio             @relation(fields: [envioId], references: [id])
+  producto   Producto          @relation(fields: [productoId], references: [id])
+  variante   ProductoVariante? @relation(fields: [varianteId], references: [id])
+
+  @@map("envio_detalles")
+}
+
+model AsignacionTecnico {
+  id         Int      @id @default(autoincrement())
+  tecnicoId  String   @map("tecnico_id")        // UUID → FK a Tecnico
+  productoId Int      @map("producto_id")
+  sedeId     String   @map("sede_id")
+  cantidad   Decimal  @db.Decimal(10, 2)
+  fecha      DateTime @default(now())
+  tecnico    Tecnico  @relation(fields: [tecnicoId], references: [id])
+  producto   Producto @relation(fields: [productoId], references: [id])
+  sede       Sede     @relation(fields: [sedeId], references: [id])
+
+  @@unique([tecnicoId, productoId, sedeId])
+  @@map("asignaciones_tecnicos")
+}
+
+model ConsumoTecnico {
+  id          Int      @id @default(autoincrement())
+  tecnicoId   String   @map("tecnico_id")        // UUID → FK a Tecnico
+  productoId  Int      @map("producto_id")
+  cantidad    Decimal  @db.Decimal(10, 2)
+  motivo      String
+  descripcion String?
+  fecha       DateTime @default(now())
+  tecnico     Tecnico  @relation(fields: [tecnicoId], references: [id])
+  producto    Producto @relation(fields: [productoId], references: [id])
+
+  @@map("consumo_tecnico")
+}
+
+model EntregaTecnico {
+  id            Int      @id @default(autoincrement())
+  productoId    Int      @map("producto_id")
+  tecnicoId     String   @map("tecnico_id")        // UUID → FK a Tecnico
+  cantidad      Int
+  fecha         DateTime @default(now())
+  registradoPor String?  @map("registrado_por")
+  sedeId        String?  @map("sede_id")            // necesario para filtros del controller
+  tecnico       Tecnico  @relation(fields: [tecnicoId], references: [id])
+  producto      Producto @relation(fields: [productoId], references: [id])
+
+  @@map("entregas_tecnicos")
+}
+
+// Equipo ONU físico en inventario
+model Onu {
+  id            Int       @id @default(autoincrement())
+  codigoPon     String?   @unique @map("codigo_pon")
+  productoId    Int       @map("producto_id")
+  sedeId        String    @map("sede_id")
+  tecnicoId     String?   @map("tecnico_id")        // UUID → FK a Tecnico
+  cliente       String?
+  createdAt     DateTime? @default(now()) @map("created_at")
+  salidaDirecta Boolean   @default(false) @map("salida_directa")
+  producto      Producto  @relation(fields: [productoId], references: [id])
+  sede          Sede      @relation(fields: [sedeId], references: [id])
+  tecnico       Tecnico?  @relation(fields: [tecnicoId], references: [id])
+
+  @@map("onus")
+}
+
+model Recojo {
+  id             Int            @id @default(autoincrement())
+  codigo         String?        @unique
+  tecnicoId      String         @map("tecnico_id")  // UUID → FK a Tecnico
+  cliente        String?
+  direccion      String?
+  serie          String?
+  tipoEquipo     String         @map("tipo_equipo")
+  estado         String         @default("pendiente")
+  registradoPor  String?        @map("registrado_por")
+  createdAt      DateTime?      @default(now()) @map("created_at")
+  comentario     String?
+  grupoOrden     String?        @map("grupo_orden")
+  codigoPon      String?        @map("codigo_pon")
+  productoId     Int?           @map("producto_id")
+  onusRecicladas OnuReciclada[]
+
+  @@map("recojos")
+}
+
+model OnuReciclada {
+  id            Int       @id @default(autoincrement())
+  recojoId      Int       @map("recojo_id")
+  tipoEquipo    String    @default("ONU") @map("tipo_equipo")
+  onuId         Int?      @map("onu_id")
+  codigoPon     String?   @map("codigo_pon")
+  productoId    Int?      @map("producto_id")
+  sedeId        String    @map("sede_id")
+  estado        String    @default("revision")
+  comentario    String?
+  revisadoPor   String?   @map("revisado_por")      // UUID
+  createdAt     DateTime? @default(now()) @map("created_at")
+  estadoTecnico String    @default("en_mano") @map("estado_tecnico")
+  recojo        Recojo    @relation(fields: [recojoId], references: [id])
+  sede          Sede      @relation(fields: [sedeId], references: [id])
+
+  @@map("onus_recicladas")
+}
+
+model SalidaDirecta {
+  id            Int       @id @default(autoincrement())
+  productoId    Int       @map("producto_id")
+  sedeId        String    @map("sede_id")
+  cantidad      Int       @default(0)
+  comentario    String?
+  registradoPor String?   @map("registrado_por")    // UUID
+  fecha         DateTime? @default(now())
+  producto      Producto  @relation(fields: [productoId], references: [id])
+  sede          Sede      @relation(fields: [sedeId], references: [id])
+
+  @@map("salidas_directas")
+}
+
+model Activo {
+  id          Int       @id @default(autoincrement())
+  sedeId      String    @map("sede_id")
+  area        String
+  nombre      String
+  descripcion String?
+  nroSerie    String?   @map("nro_serie")
+  estado      String    @default("operativo")
+  createdAt   DateTime? @default(now()) @map("created_at")
+  sede        Sede      @relation(fields: [sedeId], references: [id])
+
+  @@map("activos")
+}
+
+// ─────────────────────────────────────────────
+// LOGS
+// ─────────────────────────────────────────────
 
 model LogActividad {
   id         String   @id @default(uuid())
@@ -293,53 +629,16 @@ model LogActividad {
   @@map("log_actividad")
 }
 
-model PuntoRed {
-  id        String      @id @default(uuid())
-  tipo      TipoPuntoRed
-  codigo    String      @unique               // "NAP-LAR-011"
-  latitud   Float
-  longitud  Float
-  capacidad Int?                              // puertos totales (8, 16...)
-  ocupados  Int         @default(0)           // puertos usados
-  estado    EstadoPuntoRed @default(ACTIVA)
-  sedeId    String
-  direccion String?                           // referencia textual
-  notas     String?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  sede      Sede        @relation(fields: [sedeId], references: [id])
-
-  @@index([sedeId])
-  @@map("puntos_red")
-}
-
-model Notificacion {
-  id        String              @id @default(uuid())
-  tipo      TipoNotificacion
-  titulo    String
-  detalle   String?
-  link      String?                              // ej: "/pendientes" o "/onus-pendientes"
-  sedeId    String?                              // para filtrar por sede en el NOC
-  // Datos del origen — para no duplicar
-  ordenId   String?                              // si vino de una orden
-  configOnuId String?                            // si vino de una ONU
-  leida     Boolean             @default(false)
-  leidaEn   DateTime?
-  leidaPor  String?                              // userId del que la marcó
-  createdAt DateTime            @default(now())
-
-  @@index([leida, createdAt])                    // para listar las no-leídas rápido
-  @@index([sedeId])
-  @@index([ordenId])                             // evitar notificación duplicada
-  @@index([configOnuId])
-  @@map("notificaciones")
-}
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
 
 enum Rol {
   SUPERADMIN
   OPERADOR_NOC
   ADMIN
   TECNICO
+  SECRETARIA
 }
 
 enum TipoOrden {

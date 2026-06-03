@@ -4,7 +4,7 @@ const prisma = require('../utils/prisma');
 // SUPERADMIN → todas | ADMIN → solo la suya
 const listar = async (req, res, next) => {
   try {
-    const where = req.usuario.rol === 'ADMIN' 
+    const where = req.usuario.rol === 'ADMIN'
       ? { id: req.usuario.sedeId }
       : {};
 
@@ -15,7 +15,8 @@ const listar = async (req, res, next) => {
           select: { usuarios: true, ordenes: true },
         },
       },
-      orderBy: { nombre: 'asc' },
+      // Sede principal primero, luego alfabético
+      orderBy: [{ esPrincipal: 'desc' }, { nombre: 'asc' }],
     });
 
     res.json(sedes);
@@ -49,23 +50,34 @@ const obtener = async (req, res, next) => {
 // POST /api/sedes — solo SUPERADMIN
 const crear = async (req, res, next) => {
   try {
-    const { nombre, ciudad } = req.body;
+    const { nombre, ciudad, esPrincipal } = req.body;
 
     if (!nombre || !ciudad)
       return res.status(400).json({ error: 'nombre y ciudad son requeridos' });
 
-    const sede = await prisma.sede.create({
-      data: { nombre: nombre.trim(), ciudad: ciudad.trim() },
+    const sede = await prisma.$transaction(async (tx) => {
+      // Solo puede haber una sede principal — quitar la marca a las demás
+      if (esPrincipal === true) {
+        await tx.sede.updateMany({ where: { esPrincipal: true }, data: { esPrincipal: false } });
+      }
+
+      return tx.sede.create({
+        data: {
+          nombre: nombre.trim(),
+          ciudad: ciudad.trim(),
+          ...(esPrincipal === true && { esPrincipal: true }),
+        },
+      });
     });
 
     await prisma.logActividad.create({
       data: {
-        usuarioId: req.usuario.id,
-        accion:    'CREAR_SEDE',
-        tabla:     'sedes',
+        usuarioId:  req.usuario.id,
+        accion:     'CREAR_SEDE',
+        tabla:      'sedes',
         registroId: sede.id,
-        detalles:  { nombre, ciudad },
-        ip:        req.ip,
+        detalles:   { nombre, ciudad, esPrincipal: sede.esPrincipal },
+        ip:         req.ip,
       },
     });
 
@@ -76,15 +88,41 @@ const crear = async (req, res, next) => {
 // PUT /api/sedes/:id — solo SUPERADMIN
 const actualizar = async (req, res, next) => {
   try {
-    const { nombre, ciudad, activo } = req.body;
+    const { nombre, ciudad, activo, esPrincipal, puedeEnviarStock } = req.body;
 
-    const sede = await prisma.sede.update({
-      where: { id: req.params.id },
-      data: {
-        ...(nombre  !== undefined && { nombre:  nombre.trim() }),
-        ...(ciudad  !== undefined && { ciudad:  ciudad.trim() }),
-        ...(activo  !== undefined && { activo }),
-      },
+    const sede = await prisma.$transaction(async (tx) => {
+      const actual = await tx.sede.findUnique({ where: { id: req.params.id } });
+      if (!actual) {
+        const error = new Error('Sede no encontrada');
+        error.status = 404;
+        throw error;
+      }
+
+      // No se puede desactivar la sede principal
+      if (actual.esPrincipal && activo === false) {
+        const error = new Error('No puedes desactivar la sede principal. Marca otra sede como principal primero.');
+        error.status = 400;
+        throw error;
+      }
+
+      // Si se marca como principal, quitar la marca a las demás
+      if (esPrincipal === true) {
+        await tx.sede.updateMany({
+          where: { id: { not: req.params.id }, esPrincipal: true },
+          data:  { esPrincipal: false },
+        });
+      }
+
+      return tx.sede.update({
+        where: { id: req.params.id },
+        data: {
+          ...(nombre           !== undefined && { nombre:          nombre.trim() }),
+          ...(ciudad           !== undefined && { ciudad:          ciudad.trim() }),
+          ...(activo           !== undefined && { activo }),
+          ...(esPrincipal      === true      && { esPrincipal:     true }),
+          ...(puedeEnviarStock !== undefined && { puedeEnviarStock }),
+        },
+      });
     });
 
     res.json(sede);
