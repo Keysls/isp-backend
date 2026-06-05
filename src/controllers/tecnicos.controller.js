@@ -107,8 +107,10 @@ const crear = async (req, res, next) => {
     const emailExiste = await prisma.usuario.findUnique({ where: { email: email.toLowerCase() } });
     if (emailExiste) return res.status(409).json({ error: 'El email ya está registrado' });
 
-    const dniExiste = await prisma.tecnico.findUnique({ where: { dni } });
-    if (dniExiste) return res.status(409).json({ error: 'El DNI ya está registrado' });
+    const dniExiste = await prisma.tecnico.findFirst({
+      where: { dni, sedeId },
+    });
+    if (dniExiste) return res.status(409).json({ error: 'El DNI ya está registrado en esta sede' });
 
     const hash = await bcrypt.hash(password, 12);
 
@@ -124,7 +126,7 @@ const crear = async (req, res, next) => {
         },
       });
       return tx.tecnico.create({
-        data: { usuarioId: usuario.id, dni, zonaAsignada, vehiculo },
+        data: { usuarioId: usuario.id, dni, sedeId, zonaAsignada, vehiculo },
         include: {
           usuario: {
             select: {

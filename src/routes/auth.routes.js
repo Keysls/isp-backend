@@ -6,4 +6,6 @@ router.post('/login',  login);
 router.post('/logout', authMiddleware, logout);
 router.get('/me',      authMiddleware, me);
 
+router.patch('/cambiar-password', authMiddleware, ctrl.cambiarPassword);
+
 module.exports = router;

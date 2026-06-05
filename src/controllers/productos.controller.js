@@ -56,7 +56,56 @@ const mapVariante = (v) => ({
 const obtenerProductos = async (req, res, next) => {
   try {
     const incluirInactivos = req.query.incluirInactivos === 'true';
-    const sedeId = req.query?.sede_id || req.query?.sedeId || null;
+    const sedeId   = req.query?.sede_id || req.query?.sedeId || null;
+    const catalogo = req.query.catalogo === 'true';  // modo catálogo = paginado
+    const q        = req.query.q?.trim() || '';
+    const page     = Math.max(1, parseInt(req.query.page) || 1);
+    const limit    = Math.min(100, parseInt(req.query.limit) || 20);
+    const skip     = (page - 1) * limit;
+    const categoria = req.query.categoria && req.query.categoria !== 'todas'
+      ? req.query.categoria : null;
+
+    // Modo catálogo: paginado + búsqueda server-side
+    if (catalogo) {
+      const where = {
+        ...(incluirInactivos ? {} : { estado: true }),
+        ...(categoria && { categoria }),
+        ...(q && {
+          OR: [
+            { nombre:   { contains: q, mode: 'insensitive' } },
+            { codigo:   { contains: q, mode: 'insensitive' } },
+            { categoria:{ contains: q, mode: 'insensitive' } },
+            { descripcion: { contains: q, mode: 'insensitive' } },
+          ],
+        }),
+      };
+
+      const [total, productos] = await Promise.all([
+        prisma.producto.count({ where }),
+        prisma.producto.findMany({
+          where,
+          include: {
+            variantes: {
+              where: incluirInactivos ? {} : { estado: true },
+              orderBy: { id: 'asc' },
+            },
+          },
+          orderBy: { nombre: 'asc' },
+          skip,
+          take: limit,
+        }),
+      ]);
+
+      return res.json({
+        data:       productos.map(p => mapProducto(p, null)),
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      });
+    }
+
+    // Modo normal (sin paginación, para stock/inventario)
     const productos = await prisma.producto.findMany({
       where: incluirInactivos ? {} : { estado: true },
       include: {

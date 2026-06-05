@@ -14,7 +14,7 @@ const login = async (req, res, next) => {
 
     const usuario = await prisma.usuario.findUnique({
       where:   { email: email.toLowerCase().trim() },
-      include: { tecnico: true, sede: { select: { id: true, nombre: true, ciudad: true } } },
+      include: { tecnico: true, sede: { select: { id: true, nombre: true, ciudad: true, puedeEnviarStock: true } } },
     });
 
     if (!usuario || !usuario.activo) {
@@ -98,7 +98,7 @@ const me = async (req, res, next) => {
       where:   { id: req.usuario.id },
       include: {
         tecnico: true,
-        sede: { select: { id: true, nombre: true, ciudad: true } },
+        sede: { select: { id: true, nombre: true, ciudad: true, puedeEnviarStock: true } },
       },
     });
 
@@ -109,4 +109,29 @@ const me = async (req, res, next) => {
   }
 };
 
-module.exports = { login, logout, me };
+// ── PATCH /api/auth/cambiar-password ────────────────────────
+const cambiarPassword = async (req, res, next) => {
+  try {
+    const { passwordActual, passwordNueva } = req.body;
+    if (!passwordActual || !passwordNueva)
+      return res.status(400).json({ error: 'Faltan campos' });
+    if (passwordNueva.length < 6)
+      return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+
+    const usuario = await prisma.usuario.findUnique({ where: { id: req.usuario.id } });
+    if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const bcrypt = require('bcryptjs');
+    const ok = await bcrypt.compare(passwordActual, usuario.password);
+    if (!ok) return res.status(401).json({ error: 'Contraseña actual incorrecta' });
+
+    const hash = await bcrypt.hash(passwordNueva, 12);
+    await prisma.usuario.update({ where: { id: req.usuario.id }, data: { password: hash } });
+
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+};
+
+
+module.exports = {
+  cambiarPassword, login, logout, me };

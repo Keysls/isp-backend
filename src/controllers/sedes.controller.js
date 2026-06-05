@@ -4,7 +4,9 @@ const prisma = require('../utils/prisma');
 // SUPERADMIN → todas | ADMIN → solo la suya
 const listar = async (req, res, next) => {
   try {
-    const where = req.usuario.rol === 'ADMIN'
+    // para_envio=true permite al ADMIN ver todas las sedes activas (elegir destino de envío)
+    const paraEnvio = req.query.para_envio === 'true';
+    const where = req.usuario.rol === 'ADMIN' && !paraEnvio
       ? { id: req.usuario.sedeId }
       : {};
 

@@ -136,6 +136,62 @@ router.post('/', requireRol('SUPERADMIN'), async (req, res, next) => {
   }
 });
 
+
+// ═════════════════════════════════════════════════════════════
+// SECRETARIOS — ADMIN gestiona secretarios de su sede
+// ═════════════════════════════════════════════════════════════
+
+// GET /api/usuarios/secretarios — lista secretarios de la sede del admin
+router.get('/secretarios', requireRol('ADMIN'), async (req, res, next) => {
+  try {
+    const secretarios = await prisma.usuario.findMany({
+      where: { sedeId: req.usuario.sedeId, rol: 'SECRETARIA' },
+      select: {
+        id: true, nombre: true, apellido: true, email: true,
+        telefono: true, activo: true, createdAt: true,
+      },
+      orderBy: { nombre: 'asc' },
+    });
+    res.json(secretarios);
+  } catch (err) { next(err); }
+});
+
+// POST /api/usuarios/secretarios — ADMIN crea un secretario en su sede
+router.post('/secretarios', requireRol('ADMIN'), async (req, res, next) => {
+  try {
+    const { nombre, apellido, email, password, telefono, dni } = req.body;
+    const sedeId = req.usuario.sedeId;
+
+    if (!nombre || !apellido || !email || !password)
+      return res.status(400).json({ error: 'Faltan campos requeridos' });
+
+    const hash    = await bcrypt.hash(password, 12);
+    const usuario = await prisma.usuario.create({
+      data: {
+        nombre:   nombre.trim(),
+        apellido: apellido.trim(),
+        email:    email.toLowerCase().trim(),
+        password: hash,
+        telefono: telefono || null,
+        rol:      'SECRETARIA',
+        sedeId,
+      },
+      select: {
+        id: true, nombre: true, apellido: true, email: true,
+        telefono: true, activo: true, createdAt: true,
+      },
+    });
+
+    res.status(201).json(usuario);
+  } catch (err) {
+    if (err.code === 'P2002') return res.status(409).json({ error: 'El email ya está registrado' });
+    next(err);
+  }
+});
+
+// PATCH /api/usuarios/:id — ADMIN edita secretarios de su sede
+// (reemplaza el requireRol de SUPERADMIN para este caso)
+
 // ═════════════════════════════════════════════════════════════
 // RUTAS PARAMÉTRICAS (deben ir DESPUÉS de las literales)
 // ═════════════════════════════════════════════════════════════
@@ -143,9 +199,16 @@ router.post('/', requireRol('SUPERADMIN'), async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────
 // PATCH /api/usuarios/:id — SUPERADMIN edita cualquier usuario
 // ─────────────────────────────────────────────────────────────
-router.patch('/:id', requireRol('SUPERADMIN'), async (req, res, next) => {
+router.patch('/:id', requireRol('SUPERADMIN', 'ADMIN'), async (req, res, next) => {
   try {
-    const { nombre, apellido, telefono, sedeId, activo } = req.body;
+    const { nombre, apellido, telefono, sedeId, activo, dni } = req.body;
+
+    // ADMIN solo puede editar usuarios de su propia sede
+    if (req.usuario.rol === 'ADMIN') {
+      const target = await prisma.usuario.findUnique({ where: { id: req.params.id } });
+      if (!target || target.sedeId !== req.usuario.sedeId)
+        return res.status(403).json({ error: 'No autorizado' });
+    }
 
     const usuario = await prisma.usuario.update({
       where: { id: req.params.id },
@@ -170,7 +233,7 @@ router.patch('/:id', requireRol('SUPERADMIN'), async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────
 // PATCH /api/usuarios/:id/activar — SUPERADMIN activa/desactiva
 // ─────────────────────────────────────────────────────────────
-router.patch('/:id/activar', requireRol('SUPERADMIN'), async (req, res, next) => {
+router.patch('/:id/activar', requireRol('SUPERADMIN', 'ADMIN'), async (req, res, next) => {
   try {
     const { activo } = req.body;
     const usuario = await prisma.usuario.update({
@@ -192,8 +255,16 @@ router.patch('/:id/password', async (req, res, next) => {
 
     const esPropioUsuario = req.usuario.id === req.params.id;
     const esSuperAdmin    = req.usuario.rol === 'SUPERADMIN';
+    const esAdmin         = req.usuario.rol === 'ADMIN';
 
-    if (!esPropioUsuario && !esSuperAdmin)
+    // ADMIN puede resetear password de secretarios de su sede
+    let esAdminDeSede = false;
+    if (esAdmin && !esPropioUsuario) {
+      const target = await prisma.usuario.findUnique({ where: { id: req.params.id } });
+      esAdminDeSede = target?.sedeId === req.usuario.sedeId && target?.rol === 'SECRETARIA';
+    }
+
+    if (!esPropioUsuario && !esSuperAdmin && !esAdminDeSede)
       return res.status(403).json({ error: 'No autorizado' });
 
     const usuario = await prisma.usuario.findUnique({ where: { id: req.params.id } });
@@ -204,7 +275,7 @@ router.patch('/:id/password', async (req, res, next) => {
       if (!ok) return res.status(401).json({ error: 'Contraseña actual incorrecta' });
     }
 
-    const hash = await bcrypt.hash(passwordNueva, 12);
+    const hash = await bcrypt.hash(passwordNueva || req.body.password, 12);
     await prisma.usuario.update({ where: { id: req.params.id }, data: { password: hash } });
 
     res.json({ mensaje: 'Contraseña actualizada correctamente' });

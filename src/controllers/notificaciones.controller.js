@@ -5,11 +5,18 @@ const prisma = require('../utils/prisma');
 const listar = async (req, res, next) => {
   try {
     const { sedeId } = req.query;
+    const rol = req.usuario?.rol;
+
+    // SUPERADMIN / OPERADOR_NOC sin sedeId: excluir notificaciones de tipo
+    // ENVIO_PENDIENTE_RECEPCION y STOCK_BAJO/CRITICO que son solo para admins de sede
+    const tiposExcluidosNoc = ['ENVIO_PENDIENTE_RECEPCION', 'STOCK_BAJO', 'STOCK_CRITICO'];
+    const esNoc = ['SUPERADMIN', 'OPERADOR_NOC'].includes(rol) && !sedeId;
 
     const items = await prisma.notificacion.findMany({
       where: {
         leida: false,
         ...(sedeId && { sedeId }),
+        ...(esNoc && { tipo: { notIn: tiposExcluidosNoc } }),
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
