@@ -989,4 +989,7 @@ module.exports = {
   statsControlador,
   inventarioTecnico,
   auditoriaControlador,
+  miInventario,
+  registrarConsumo,
+  registrarRetiro,
 };
