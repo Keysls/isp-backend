@@ -274,6 +274,7 @@ const obtener = async (req, res, next) => {
         instalacion: { include: { configOnu: true, fotos: true } },
         sede:        { select: { id: true, nombre: true, ciudad: true } },
         contratoRef: { select: { numero: true, latitud: true, longitud: true, tipoServicio: true, precinto: true } },
+
       },
     });
     if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
@@ -282,7 +283,18 @@ const obtener = async (req, res, next) => {
     if (req.usuario.rol === 'ADMIN' && orden.sedeId !== req.usuario.sedeId)
       return res.status(403).json({ error: 'No tienes acceso a esta orden' });
 
-    res.json(orden);
+    // Consumos de materiales registrados para esta orden
+    const consumos = await prisma.consumoTecnico.findMany({
+      where: {
+        descripcion: { contains: req.params.id },
+      },
+      include: {
+        producto: { select: { nombre: true, codigo: true, unidad: true } },
+      },
+      orderBy: { fecha: 'desc' },
+    });
+
+    res.json({ ...orden, consumos });
   } catch (err) { next(err); }
 };
 

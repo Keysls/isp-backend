@@ -477,6 +477,7 @@ model ConsumoTecnico {
   cantidad    Decimal  @db.Decimal(10, 2)
   motivo      String
   descripcion String?
+  sedeId      String?
   fecha       DateTime @default(now())
   producto    Producto @relation(fields: [productoId], references: [id])
   tecnico     Tecnico  @relation(fields: [tecnicoId], references: [id])

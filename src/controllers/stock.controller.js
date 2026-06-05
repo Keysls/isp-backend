@@ -613,26 +613,23 @@ const auditoriaControlador = async (req, res, next) => {
 
     const [entregas, consumos, salidas, entradas, envios] = await Promise.all([
       prisma.entregaTecnico.findMany({
-        where: {
-          ...(sedeId && { tecnicoId: {
-            in: (await prisma.tecnico.findMany({
-              where: { usuario: { sedeId } },
-              select: { id: true },
-            })).map(t => t.id),
-          }}),
-        },
+          where: {
+            ...(sedeId && { tecnico: { usuario: { sedeId } } }),
+          },
         select: {
           id: true, fecha: true, cantidad: true, tecnicoId: true,
           producto: { select: { nombre: true } },
+          tecnico: { select: { usuario: { select: { nombre: true, apellido: true } } } },
         },
         orderBy: { fecha: 'desc' },
         take: 100,
       }),
       prisma.consumoTecnico.findMany({
-        where: { ...(sedeId && { producto: { stockSedes: { some: { sedeId } } } }) },
+        where: { ...(sedeId && { tecnico: { usuario: { sedeId } } }) },
         select: {
           id: true, fecha: true, cantidad: true, tecnicoId: true, motivo: true, descripcion: true,
           producto: { select: { nombre: true } },
+          tecnico: { select: { usuario: { select: { nombre: true, apellido: true } } } },
         },
         orderBy: { fecha: 'desc' },
         take: 100,
@@ -677,8 +674,17 @@ const auditoriaControlador = async (req, res, next) => {
     ]);
 
     const rows = [
-      ...entregas.map(e => ({ id: e.id, fecha: e.fecha, tipo: 'salida', item: e.producto.nombre, cantidad: e.cantidad, tecnico_id: e.tecnicoId })),
-      ...consumos.map(c => ({ id: c.id, fecha: c.fecha, tipo: 'consumo', item: c.producto.nombre, cantidad: Number(c.cantidad), tecnico_id: c.tecnicoId, motivo: c.motivo, comentario: c.descripcion })),
+      ...entregas.map(e => ({
+        id: e.id, fecha: e.fecha, tipo: 'salida', item: e.producto.nombre, cantidad: e.cantidad,
+        tecnico_id:     e.tecnicoId,
+        tecnico_nombre: e.tecnico?.usuario ? `${e.tecnico.usuario.nombre} ${e.tecnico.usuario.apellido}`.trim() : null,
+      })),
+      ...consumos.map(c => ({
+        id: c.id, fecha: c.fecha, tipo: 'consumo', item: c.producto.nombre, cantidad: Number(c.cantidad),
+        tecnico_id:     c.tecnicoId,
+        tecnico_nombre: c.tecnico?.usuario ? `${c.tecnico.usuario.nombre} ${c.tecnico.usuario.apellido}`.trim() : null,
+        motivo: c.motivo, comentario: c.descripcion,
+      })),
       ...salidas.map(s => ({ id: s.id, fecha: s.fecha, tipo: 'salida_directa', item: s.producto.nombre, cantidad: s.cantidad, comentario: s.comentario })),
       ...entradas.map(e => ({ id: e.id, fecha: e.fecha, tipo: 'entrada', item: e.producto.nombre, cantidad: e.cantidad, comentario: e.comentario })),
       ...envios.flatMap(e => e.detalles.map(d => ({
@@ -794,7 +800,10 @@ const miInventario = async (req, res, next) => {
       }),
       // Consumos registrados (material gastado)
       prisma.consumoTecnico.findMany({
-        where: { tecnicoId },
+        where: { 
+            tecnicoId,
+            ...(sedeId && { sedeId }),
+          },
         include: { producto: { select: { id: true, nombre: true, codigo: true } } },
         orderBy: { fecha: 'desc' },
         take: 100,
@@ -887,7 +896,7 @@ const registrarConsumo = async (req, res, next) => {
     const usuarioId = req.usuario?.id;
     const tecnico = await prisma.tecnico.findUnique({
       where: { usuarioId },
-      select: { id: true },
+      select: { id: true, sedeId: true },
     });
     if (!tecnico) return res.status(404).json({ error: 'Técnico no encontrado' });
 
@@ -902,6 +911,7 @@ const registrarConsumo = async (req, res, next) => {
         .map(i => prisma.consumoTecnico.create({
           data: {
             tecnicoId:  tecnico.id,
+            sedeId:     tecnico.sedeId,
             productoId: Number(i.productoId),
             cantidad:   Number(i.cantidad),
             motivo:     motivo || 'SERVICIO',
