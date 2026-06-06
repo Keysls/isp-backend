@@ -855,6 +855,37 @@ const miInventario = async (req, res, next) => {
     const totalDisponibles = items.reduce((s, i) => s + i.disponible, 0);
     const totalSinStock   = items.filter(i => i.sinStock).length;
 
+    // Enriquecer consumos con datos legibles de la orden
+    // La descripcion guarda "Orden: {uuid}" — extraemos el uuid y hacemos join
+    const consumosEnriquecidos = await Promise.all(
+      consumos.map(async (c) => {
+        let ordenInfo = null;
+        if (c.descripcion) {
+          // Extraer el ordenId del texto "Orden: uuid" o directamente si es solo uuid
+          const match = c.descripcion.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+          if (match) {
+            const orden = await prisma.ordenServicio.findUnique({
+              where: { id: match[1] },
+              select: { nServicio: true, abonado: true, contrato: true },
+            }).catch(() => null);
+            if (orden) ordenInfo = orden;
+          }
+        }
+        return {
+          productoId:  c.productoId,
+          nombre:      c.producto.nombre,
+          cantidad:    Number(c.cantidad),
+          motivo:      c.motivo,
+          descripcion: c.descripcion,
+          fecha:       c.fecha,
+          // Datos legibles de la orden
+          nServicio:   ordenInfo?.nServicio || null,
+          abonado:     ordenInfo?.abonado   || null,
+          contrato:    ordenInfo?.contrato  || null,
+        };
+      })
+    );
+
     res.json({
       tecnicoId,
       metricas: {
@@ -870,14 +901,7 @@ const miInventario = async (req, res, next) => {
         producto:  o.producto.nombre,
         codigo:    o.producto.codigo,
       })),
-      historialConsumos: consumos.map(c => ({
-        productoId: c.productoId,
-        nombre:     c.producto.nombre,
-        cantidad:   Number(c.cantidad),
-        motivo:     c.motivo,
-        descripcion: c.descripcion,
-        fecha:      c.fecha,
-      })),
+      historialConsumos: consumosEnriquecidos,
       historialEntregas: entregas.map(e => ({
         nombre:   e.producto.nombre,
         codigo:   e.producto.codigo,
