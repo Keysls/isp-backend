@@ -797,7 +797,7 @@ const miInventario = async (req, res, next) => {
 
     const { id: tecnicoId, sedeId } = tecnico;
 
-    const [asignaciones, consumos, onus, entregas] = await Promise.all([
+    const [asignaciones, consumos, onus, entregas, recojos] = await Promise.all([
       // Items asignados con sus cantidades
       prisma.asignacionTecnico.findMany({
         where: { tecnicoId, ...(sedeId && { sedeId }) },
@@ -833,6 +833,13 @@ const miInventario = async (req, res, next) => {
         include: { producto: { select: { nombre: true, codigo: true } } },
         orderBy: { fecha: 'desc' },
         take: 50,
+      }),
+      // Recojos: equipos recuperados de clientes por el técnico
+      prisma.recojo.findMany({
+        where: { tecnicoId },
+        include: { },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
       }),
     ]);
 
@@ -929,6 +936,17 @@ const miInventario = async (req, res, next) => {
         cantidad: e.cantidad,
         fecha:    e.fecha,
       })),
+      recojos: recojos.map(r => ({
+        id:         r.id,
+        tipoEquipo: r.tipoEquipo,
+        codigoPon:  r.codigoPon,
+        productoId: r.productoId,
+        estado:     r.estado,
+        cliente:    r.cliente,
+        comentario: r.comentario,
+        grupoOrden: r.grupoOrden,
+        fecha:      r.createdAt,
+      })),
     });
   } catch (err) { next(err); }
 };
@@ -974,8 +992,8 @@ const registrarConsumo = async (req, res, next) => {
 
 
 // ── POST /api/stock/mi-retiro ────────────────────────────────
-// El técnico recupera equipos de una orden de retiro/baja
-// y se suman a su inventario personal
+// El técnico registra equipos recuperados de clientes — usa modelo Recojo
+// items: [{ productoId, tipoEquipo, codigoPon?, cliente? }]
 const registrarRetiro = async (req, res, next) => {
   try {
     const usuarioId = req.usuario?.id;
@@ -985,49 +1003,29 @@ const registrarRetiro = async (req, res, next) => {
     });
     if (!tecnico) return res.status(404).json({ error: 'Técnico no encontrado' });
 
-    const { items, ordenId, descripcion } = req.body;
-    // items: [{ productoId, cantidad }]
+    const { items, ordenId } = req.body;
     if (!Array.isArray(items) || items.length === 0)
       return res.status(400).json({ error: 'Debe indicar al menos un item' });
 
-    const resultado = await prisma.$transaction(async (tx) => {
-      const registros = [];
-
-      for (const item of items) {
-        if (!item.productoId || Number(item.cantidad) <= 0) continue;
-        const cantidad = Number(item.cantidad);
-
-        // 1. Sumar al stock de la sede del técnico
-        if (tecnico.sedeId) {
-          await tx.stockSede.upsert({
-            where: { sedeId_productoId: { sedeId: tecnico.sedeId, productoId: Number(item.productoId) } },
-            update: { cantidad: { increment: cantidad } },
-            create: { sedeId: tecnico.sedeId, productoId: Number(item.productoId), cantidad },
-          });
-          // También sumar al stock total del producto
-          await tx.producto.update({
-            where: { id: Number(item.productoId) },
-            data: { stockTotal: { increment: cantidad } },
-          });
-        }
-
-        // 2. Registrar como entrada en la auditoría
-        const entrada = await tx.entradaStock.create({
+    const registros = await Promise.all(
+      items.map(item =>
+        prisma.recojo.create({
           data: {
-            productoId:    Number(item.productoId),
-            cantidad,
-            sedeId:        tecnico.sedeId,
+            tecnicoId:     tecnico.id,
+            productoId:    item.productoId ? Number(item.productoId) : null,
+            tipoEquipo:    item.tipoEquipo || 'EQUIPO',
+            codigoPon:     item.codigoPon || null,
+            cliente:       item.cliente   || null,
+            estado:        'pendiente',
+            grupoOrden:    ordenId        || null,
             registradoPor: String(usuarioId),
-            comentario:    descripcion || (ordenId ? `Retiro orden: ${ordenId}` : 'Retiro de equipo'),
+            comentario:    ordenId ? `Retiro orden: ${ordenId}` : 'Retiro de equipo',
           },
-        });
-        registros.push(entrada);
-      }
+        })
+      )
+    );
 
-      return registros;
-    });
-
-    res.status(201).json({ ok: true, registrados: resultado.length });
+    res.status(201).json({ ok: true, registrados: registros.length });
   } catch (err) { next(err); }
 };
 
