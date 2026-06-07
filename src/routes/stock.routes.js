@@ -20,6 +20,7 @@ router.get('/tecnico/:tecnicoId', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NO
 router.get('/mi-inventario',      requireRol('TECNICO'), ctrl.miInventario);
 router.post('/mi-consumo',        requireRol('TECNICO'), ctrl.registrarConsumo);
 router.post('/mi-retiro',         requireRol('TECNICO'), ctrl.registrarRetiro);
+router.get('/catalogo',           requireRol('TECNICO'), ctrl.catalogoTecnico);
 router.get('/auditoria', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.auditoriaControlador);
 
 module.exports = router;

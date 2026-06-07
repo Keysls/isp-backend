@@ -1032,8 +1032,25 @@ const registrarRetiro = async (req, res, next) => {
 };
 
 
+// ── GET /api/stock/catalogo ──────────────────────────────────
+// Catálogo de productos accesible para técnicos (para retiros)
+const catalogoTecnico = async (req, res, next) => {
+  try {
+    const productos = await prisma.producto.findMany({
+      where: { estado: true },
+      select: {
+        id: true, nombre: true, codigo: true,
+        categoria: true, unidad: true,
+      },
+      orderBy: [{ categoria: 'asc' }, { nombre: 'asc' }],
+    });
+    res.json(productos);
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   verStock,
+  catalogoTecnico,
   entradaStock,
   salidaStock,
   salidaStockMultiple,
