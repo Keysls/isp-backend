@@ -289,7 +289,12 @@ const obtener = async (req, res, next) => {
         descripcion: { contains: req.params.id },
       },
       include: {
-        producto: { select: { nombre: true, codigo: true, unidad: true } },
+        producto: {
+          select: {
+            nombre: true, codigo: true, unidad: true,
+            esMedible: true, metrosPorUnidad: true,
+          },
+        },
       },
       orderBy: { fecha: 'desc' },
     });

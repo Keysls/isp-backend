@@ -722,7 +722,10 @@ const inventarioTecnico = async (req, res, next) => {
         where: { tecnicoId, sedeId },
         include: {
           producto: {
-            select: { id: true, nombre: true, codigo: true, categoria: true, unidad: true },
+            select: {
+              id: true, nombre: true, codigo: true, categoria: true, unidad: true,
+              esMedible: true, metrosPorUnidad: true,
+            },
           },
         },
         orderBy: { fecha: 'desc' },
@@ -793,7 +796,10 @@ const miInventario = async (req, res, next) => {
         where: { tecnicoId, ...(sedeId && { sedeId }) },
         include: {
           producto: {
-            select: { id: true, nombre: true, codigo: true, categoria: true, unidad: true },
+            select: {
+              id: true, nombre: true, codigo: true, categoria: true, unidad: true,
+              esMedible: true, metrosPorUnidad: true,
+            },
           },
         },
         orderBy: { fecha: 'desc' },
@@ -835,17 +841,25 @@ const miInventario = async (req, res, next) => {
       const asignado  = Number(a.cantidad);
       const utilizado = consumoPorProducto[a.productoId] || 0;
       const disponible = Math.max(0, asignado - utilizado);
+      const esMedible      = a.producto.esMedible || false;
+      const metrosPorUnidad = a.producto.metrosPorUnidad || null;
       return {
-        productoId:  a.productoId,
-        nombre:      a.producto.nombre,
-        codigo:      a.producto.codigo || '',
-        categoria:   a.producto.categoria || '',
-        unidad:      a.producto.unidad || 'und',
+        productoId:       a.productoId,
+        nombre:           a.producto.nombre,
+        codigo:           a.producto.codigo || '',
+        categoria:        a.producto.categoria || '',
+        unidad:           a.producto.unidad || 'und',
         asignado,
         utilizado,
         disponible,
-        sinStock:    disponible === 0,
-        fecha:       a.fecha,
+        sinStock:         disponible === 0,
+        fecha:            a.fecha,
+        esMedible,
+        metrosPorUnidad,
+        // Valores en metros para mostrar al técnico
+        asignadoMetros:   esMedible && metrosPorUnidad ? asignado * metrosPorUnidad : null,
+        utilizadoMetros:  esMedible && metrosPorUnidad ? utilizado * metrosPorUnidad : null,
+        disponibleMetros: esMedible && metrosPorUnidad ? Math.max(0, disponible * metrosPorUnidad) : null,
       };
     });
 
@@ -929,19 +943,36 @@ const registrarConsumo = async (req, res, next) => {
     if (!Array.isArray(items) || items.length === 0)
       return res.status(400).json({ error: 'Debe indicar al menos un item' });
 
+    // Para productos medibles, el técnico envía metros — convertir a unidades
+    const productosInfo = await prisma.producto.findMany({
+      where: { id: { in: items.map(i => Number(i.productoId)) } },
+      select: { id: true, esMedible: true, metrosPorUnidad: true },
+    });
+    const productoMap = Object.fromEntries(productosInfo.map(p => [p.id, p]));
+
+    const itemsNormalizados = items
+      .filter(i => i.productoId && Number(i.cantidad) > 0)
+      .map(i => {
+        const prod = productoMap[Number(i.productoId)];
+        let cantidad = Number(i.cantidad);
+        if (prod?.esMedible && prod?.metrosPorUnidad) {
+          // El técnico ingresó metros → convertir a unidades (fraccionario)
+          cantidad = Number(i.cantidad) / prod.metrosPorUnidad;
+        }
+        return { productoId: Number(i.productoId), cantidad };
+      });
+
     const registros = await Promise.all(
-      items
-        .filter(i => i.productoId && Number(i.cantidad) > 0)
-        .map(i => prisma.consumoTecnico.create({
-          data: {
-            tecnicoId:  tecnico.id,
-            sedeId:     tecnico.sedeId,
-            productoId: Number(i.productoId),
-            cantidad:   Number(i.cantidad),
-            motivo:     motivo || 'SERVICIO',
-            descripcion: descripcion || (ordenId ? `Orden: ${ordenId}` : null),
-          },
-        }))
+      itemsNormalizados.map(i => prisma.consumoTecnico.create({
+        data: {
+          tecnicoId:   tecnico.id,
+          sedeId:      tecnico.sedeId,
+          productoId:  i.productoId,
+          cantidad:    i.cantidad,
+          motivo:      motivo || 'SERVICIO',
+          descripcion: descripcion || (ordenId ? `Orden: ${ordenId}` : null),
+        },
+      }))
     );
 
     res.status(201).json({ ok: true, registrados: registros.length });
