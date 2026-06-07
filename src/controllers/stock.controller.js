@@ -628,7 +628,7 @@ const auditoriaControlador = async (req, res, next) => {
         where: { ...(sedeId && { tecnico: { usuario: { sedeId } } }) },
         select: {
           id: true, fecha: true, cantidad: true, tecnicoId: true, motivo: true, descripcion: true,
-          producto: { select: { nombre: true } },
+          producto: { select: { nombre: true, esMedible: true, metrosPorUnidad: true } },
           tecnico: { select: { usuario: { select: { nombre: true, apellido: true } } } },
         },
         orderBy: { fecha: 'desc' },
@@ -679,12 +679,19 @@ const auditoriaControlador = async (req, res, next) => {
         tecnico_id:     e.tecnicoId,
         tecnico_nombre: e.tecnico?.usuario ? `${e.tecnico.usuario.nombre} ${e.tecnico.usuario.apellido}`.trim() : null,
       })),
-      ...consumos.map(c => ({
-        id: c.id, fecha: c.fecha, tipo: 'consumo', item: c.producto.nombre, cantidad: Number(c.cantidad),
-        tecnico_id:     c.tecnicoId,
-        tecnico_nombre: c.tecnico?.usuario ? `${c.tecnico.usuario.nombre} ${c.tecnico.usuario.apellido}`.trim() : null,
-        motivo: c.motivo, comentario: c.descripcion,
-      })),
+      ...consumos.map(c => {
+        const cantBase = Number(c.cantidad);
+        const esMedible = c.producto.esMedible && c.producto.metrosPorUnidad;
+        const cantMostrar = esMedible ? cantBase * c.producto.metrosPorUnidad : cantBase;
+        const unidad = esMedible ? 'm' : null;
+        return {
+          id: c.id, fecha: c.fecha, tipo: 'consumo', item: c.producto.nombre,
+          cantidad: esMedible ? `${cantMostrar % 1 === 0 ? cantMostrar : cantMostrar.toFixed(1)} m` : cantMostrar,
+          tecnico_id:     c.tecnicoId,
+          tecnico_nombre: c.tecnico?.usuario ? `${c.tecnico.usuario.nombre} ${c.tecnico.usuario.apellido}`.trim() : null,
+          motivo: c.motivo, comentario: c.descripcion,
+        };
+      }),
       ...salidas.map(s => ({ id: s.id, fecha: s.fecha, tipo: 'salida_directa', item: s.producto.nombre, cantidad: s.cantidad, comentario: s.comentario })),
       ...entradas.map(e => ({ id: e.id, fecha: e.fecha, tipo: 'entrada', item: e.producto.nombre, cantidad: e.cantidad, comentario: e.comentario })),
       ...envios.flatMap(e => e.detalles.map(d => ({
@@ -943,24 +950,10 @@ const registrarConsumo = async (req, res, next) => {
     if (!Array.isArray(items) || items.length === 0)
       return res.status(400).json({ error: 'Debe indicar al menos un item' });
 
-    // Para productos medibles, el técnico envía metros — convertir a unidades
-    const productosInfo = await prisma.producto.findMany({
-      where: { id: { in: items.map(i => Number(i.productoId)) } },
-      select: { id: true, esMedible: true, metrosPorUnidad: true },
-    });
-    const productoMap = Object.fromEntries(productosInfo.map(p => [p.id, p]));
-
-    const itemsNormalizados = items
-      .filter(i => i.productoId && Number(i.cantidad) > 0)
-      .map(i => {
-        const prod = productoMap[Number(i.productoId)];
-        let cantidad = Number(i.cantidad);
-        if (prod?.esMedible && prod?.metrosPorUnidad) {
-          // El técnico ingresó metros → convertir a unidades (fraccionario)
-          cantidad = Number(i.cantidad) / prod.metrosPorUnidad;
-        }
-        return { productoId: Number(i.productoId), cantidad };
-      });
+    // La app móvil ya convierte metros→unidades antes de enviar
+    // El backend guarda directamente sin reconvertir
+    const itemsNormalizados = items.filter(i => i.productoId && Number(i.cantidad) > 0)
+      .map(i => ({ productoId: Number(i.productoId), cantidad: Number(i.cantidad) }));
 
     const registros = await Promise.all(
       itemsNormalizados.map(i => prisma.consumoTecnico.create({
