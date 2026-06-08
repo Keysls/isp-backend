@@ -32,6 +32,7 @@ model Sede {
   stockSedeVariantes StockSedeVariante[]
   tecnicos           Tecnico[]
   usuarios           Usuario[]
+  devoluciones  DevolucionTecnico[]
 
   @@map("sedes")
 }
@@ -70,6 +71,7 @@ model Tecnico {
   entregas      EntregaTecnico[]
   onusAsignadas Onu[]
   ordenes       OrdenServicio[]
+  devoluciones  DevolucionTecnico[]
   sede          Sede?               @relation(fields: [sedeId], references: [id])
   usuario       Usuario             @relation(fields: [usuarioId], references: [id])
 
@@ -365,6 +367,7 @@ model Producto {
   variantes         ProductoVariante[]
   salidasDirectas   SalidaDirecta[]
   stockSedes        StockSede[]
+  devolucionDetalles DevolucionDetalle[]
 
   @@map("productos")
 }
@@ -593,6 +596,33 @@ model LogActividad {
   createdAt  DateTime @default(now())
 
   @@map("log_actividad")
+}
+model DevolucionTecnico {
+  id            Int                 @id @default(autoincrement())
+  tecnicoId     String              @map("tecnico_id")
+  sedeId        String              @map("sede_id")
+  estado        String              @default("pendiente")
+  comentario    String?
+  registradoPor String?             @map("registrado_por")
+  revisadoPor   String?             @map("revisado_por")
+  fechaRevision DateTime?           @map("fecha_revision")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  detalles      DevolucionDetalle[]
+  tecnico       Tecnico             @relation(fields: [tecnicoId], references: [id])
+  sede          Sede                @relation(fields: [sedeId], references: [id])
+
+  @@map("devoluciones_tecnico")
+}
+
+model DevolucionDetalle {
+  id           Int               @id @default(autoincrement())
+  devolucionId Int               @map("devolucion_id")
+  productoId   Int               @map("producto_id")
+  cantidad     Decimal           @db.Decimal(10, 2)
+  devolucion   DevolucionTecnico @relation(fields: [devolucionId], references: [id])
+  producto     Producto          @relation(fields: [productoId], references: [id])
+
+  @@map("devolucion_detalles")
 }
 
 enum Rol {

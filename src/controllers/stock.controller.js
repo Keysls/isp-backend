@@ -837,7 +837,9 @@ const miInventario = async (req, res, next) => {
       // Recojos: equipos recuperados de clientes por el técnico
       prisma.recojo.findMany({
         where: { tecnicoId },
-        include: { },
+        include: {
+          onusRecicladas: false,
+        },
         orderBy: { createdAt: 'desc' },
         take: 100,
       }),
@@ -936,17 +938,47 @@ const miInventario = async (req, res, next) => {
         cantidad: e.cantidad,
         fecha:    e.fecha,
       })),
-      recojos: recojos.map(r => ({
-        id:         r.id,
-        tipoEquipo: r.tipoEquipo,
-        codigoPon:  r.codigoPon,
-        productoId: r.productoId,
-        estado:     r.estado,
-        cliente:    r.cliente,
-        comentario: r.comentario,
-        grupoOrden: r.grupoOrden,
-        fecha:      r.createdAt,
-      })),
+      recojos: await Promise.all(recojos.map(async r => {
+    let nombreProducto = null;
+    let nServicio = null;
+    let abonado = null;
+    let contrato = null;
+
+    if (r.productoId) {
+        const prod = await prisma.producto.findUnique({
+            where: { id: r.productoId },
+            select: { nombre: true },
+        }).catch(() => null);
+        nombreProducto = prod?.nombre ?? null;
+    }
+
+    // Buscar datos legibles de la orden asociada
+    if (r.grupoOrden) {
+        const orden = await prisma.ordenServicio.findUnique({
+            where: { id: r.grupoOrden },
+            select: { nServicio: true, abonado: true, contrato: true },
+        }).catch(() => null);
+        nServicio = orden?.nServicio ?? null;
+        abonado   = orden?.abonado   ?? null;
+        contrato  = orden?.contrato  ?? null;
+    }
+
+    return {
+        id:             r.id,
+        tipoEquipo:     r.tipoEquipo,
+        codigoPon:      r.codigoPon,
+        productoId:     r.productoId,
+        nombreProducto,
+        estado:         r.estado,
+        cliente:        r.cliente,
+        comentario:     r.comentario,
+        grupoOrden:     r.grupoOrden,
+        nServicio,      // ← NUEVO
+        abonado,        // ← NUEVO
+        contrato,       // ← NUEVO
+        fecha:          r.createdAt,
+    };
+    })),
     });
   } catch (err) { next(err); }
 };
@@ -1007,23 +1039,81 @@ const registrarRetiro = async (req, res, next) => {
     if (!Array.isArray(items) || items.length === 0)
       return res.status(400).json({ error: 'Debe indicar al menos un item' });
 
-    const registros = await Promise.all(
-      items.map(item =>
-        prisma.recojo.create({
+    const registros = await prisma.$transaction(async (tx) => {
+      const resultados = [];
+
+      for (const item of items) {
+        const productoId = item.productoId ? Number(item.productoId) : null;
+
+        // 1. Crear el Recojo (historial / trazabilidad para el admin)
+        const recojo = await tx.recojo.create({
           data: {
             tecnicoId:     tecnico.id,
-            productoId:    item.productoId ? Number(item.productoId) : null,
+            productoId,
             tipoEquipo:    item.tipoEquipo || 'EQUIPO',
-            codigoPon:     item.codigoPon || null,
-            cliente:       item.cliente   || null,
-            estado:        'pendiente',
-            grupoOrden:    ordenId        || null,
+            codigoPon:     item.codigoPon  || null,
+            cliente:       item.cliente    || null,
+            estado:        'en_mano',        // ← ya está en mano del técnico
+            grupoOrden:    ordenId          || null,
             registradoPor: String(usuarioId),
             comentario:    ordenId ? `Retiro orden: ${ordenId}` : 'Retiro de equipo',
           },
-        })
-      )
-    );
+        });
+
+        // 2. Sumar al inventario del técnico inmediatamente (si tiene productoId)
+        if (productoId) {
+          await tx.asignacionTecnico.upsert({
+            where: {
+              tecnicoId_productoId_sedeId: {
+                tecnicoId:  tecnico.id,
+                productoId,
+                sedeId:     tecnico.sedeId,
+              },
+            },
+            create: {
+              tecnicoId:  tecnico.id,
+              productoId,
+              sedeId:     tecnico.sedeId,
+              cantidad:   1,
+            },
+            update: {
+              cantidad: { increment: 1 },
+            },
+          });
+
+          // 3. Si es una ONU con código PON, registrarla como ONU asignada al técnico
+          if (item.tipoEquipo === 'ONU' && item.codigoPon) {
+            // Buscar si ya existe esa ONU en el sistema
+            const onuExistente = await tx.onu.findUnique({
+              where: { codigoPon: item.codigoPon },
+            });
+
+            if (onuExistente) {
+              // Reasignar al técnico que la recogió
+              await tx.onu.update({
+                where: { codigoPon: item.codigoPon },
+                data:  { tecnicoId: tecnico.id, salidaDirecta: false },
+              });
+            } else {
+              // ONU nueva en el sistema (nunca estuvo registrada)
+              await tx.onu.create({
+                data: {
+                  codigoPon:  item.codigoPon,
+                  productoId,
+                  sedeId:     tecnico.sedeId,
+                  tecnicoId:  tecnico.id,
+                  cliente:    null,
+                },
+              });
+            }
+          }
+        }
+
+        resultados.push(recojo);
+      }
+
+      return resultados;
+    });
 
     res.status(201).json({ ok: true, registrados: registros.length });
   } catch (err) { next(err); }

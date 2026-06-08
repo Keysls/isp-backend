@@ -1,6 +1,13 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/stock.controller');
 const { authMiddleware, requireRol } = require('../middleware/auth.middleware');
+const {
+  registrarDevolucion,
+  misDevoluciones,
+  aprobarDevolucion,
+  rechazarDevolucion,
+} = require('../controllers/stock.devoluciones.controller');
+
 
 router.use(authMiddleware);
 
@@ -22,5 +29,10 @@ router.post('/mi-consumo',        requireRol('TECNICO'), ctrl.registrarConsumo);
 router.post('/mi-retiro',         requireRol('TECNICO'), ctrl.registrarRetiro);
 router.get('/catalogo',           requireRol('TECNICO'), ctrl.catalogoTecnico);
 router.get('/auditoria', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.auditoriaControlador);
+
+router.post('/mi-devolucion',             requireRol('TECNICO'),                          registrarDevolucion);
+router.get('/mis-devoluciones',           requireRol('TECNICO'),                          misDevoluciones);
+router.post('/devoluciones/:id/aprobar',  requireRol('SUPERADMIN', 'ADMIN'),              aprobarDevolucion);
+router.post('/devoluciones/:id/rechazar', requireRol('SUPERADMIN', 'ADMIN'),              rechazarDevolucion);
 
 module.exports = router;
