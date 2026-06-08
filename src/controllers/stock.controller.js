@@ -679,19 +679,39 @@ const auditoriaControlador = async (req, res, next) => {
         tecnico_id:     e.tecnicoId,
         tecnico_nombre: e.tecnico?.usuario ? `${e.tecnico.usuario.nombre} ${e.tecnico.usuario.apellido}`.trim() : null,
       })),
-      ...consumos.map(c => {
+      
+      ...(await Promise.all(consumos.map(async c => {
         const cantBase = Number(c.cantidad);
         const esMedible = c.producto.esMedible && c.producto.metrosPorUnidad;
         const cantMostrar = esMedible ? cantBase * c.producto.metrosPorUnidad : cantBase;
-        const unidad = esMedible ? 'm' : null;
+
+        // Buscar contrato/abonado desde la descripción "Orden: uuid"
+        let nServicio = null, abonado = null, contrato = null;
+        if (c.descripcion) {
+          const match = c.descripcion.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+          if (match) {
+            const orden = await prisma.ordenServicio.findUnique({
+              where: { id: match[1] },
+              select: { nServicio: true, abonado: true, contrato: true },
+            }).catch(() => null);
+            if (orden) { nServicio = orden.nServicio; abonado = orden.abonado; contrato = orden.contrato; }
+          }
+        }
+
         return {
           id: c.id, fecha: c.fecha, tipo: 'consumo', item: c.producto.nombre,
           cantidad: esMedible ? `${cantMostrar % 1 === 0 ? cantMostrar : cantMostrar.toFixed(1)} m` : cantMostrar,
           tecnico_id:     c.tecnicoId,
           tecnico_nombre: c.tecnico?.usuario ? `${c.tecnico.usuario.nombre} ${c.tecnico.usuario.apellido}`.trim() : null,
-          motivo: c.motivo, comentario: c.descripcion,
+          motivo: c.motivo,
+          comentario: c.descripcion,
+          nServicio,
+          abonado,
+          contrato,
         };
-      }),
+      }))),
+
+
       ...salidas.map(s => ({ id: s.id, fecha: s.fecha, tipo: 'salida_directa', item: s.producto.nombre, cantidad: s.cantidad, comentario: s.comentario })),
       ...entradas.map(e => ({ id: e.id, fecha: e.fecha, tipo: 'entrada', item: e.producto.nombre, cantidad: e.cantidad, comentario: e.comentario })),
       ...envios.flatMap(e => e.detalles.map(d => ({
@@ -723,16 +743,13 @@ const inventarioTecnico = async (req, res, next) => {
     const { tecnicoId } = req.params;
     const sedeId = getSedeId(req);
 
-    const [asignaciones, entregas, onus] = await Promise.all([
+    const [asignaciones, entregas, onus, consumos, recojos] = await Promise.all([
       // Items normales asignados
       prisma.asignacionTecnico.findMany({
         where: { tecnicoId, sedeId },
         include: {
           producto: {
-            select: {
-              id: true, nombre: true, codigo: true, categoria: true, unidad: true,
-              esMedible: true, metrosPorUnidad: true,
-            },
+            select: { id: true, nombre: true, codigo: true, categoria: true, unidad: true, esMedible: true, metrosPorUnidad: true },
           },
         },
         orderBy: { fecha: 'desc' },
@@ -750,9 +767,98 @@ const inventarioTecnico = async (req, res, next) => {
         include: { producto: { select: { nombre: true, codigo: true } } },
         orderBy: { createdAt: 'desc' },
       }),
+      // ── NUEVO: Consumos (material gastado) ──────────────────
+      prisma.consumoTecnico.findMany({
+        where: { tecnicoId },
+        include: { producto: { select: { nombre: true, esMedible: true, metrosPorUnidad: true } } },
+        orderBy: { fecha: 'desc' },
+        take: 100,
+      }),
+      // ── NUEVO: Recojos (equipos recuperados de clientes) ────
+      prisma.recojo.findMany({
+        where: { tecnicoId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
     ]);
 
     const totalItems = asignaciones.reduce((s, a) => s + Number(a.cantidad), 0);
+
+    // Enriquecer consumos con datos de la orden (contrato/abonado)
+    const consumosEnriquecidos = await Promise.all(
+      consumos.map(async (c) => {
+        let nServicio = null, abonado = null, contrato = null;
+        if (c.descripcion) {
+          const match = c.descripcion.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+          if (match) {
+            const orden = await prisma.ordenServicio.findUnique({
+              where: { id: match[1] },
+              select: { nServicio: true, abonado: true, contrato: true },
+            }).catch(() => null);
+            if (orden) { nServicio = orden.nServicio; abonado = orden.abonado; contrato = orden.contrato; }
+          }
+        }
+        const esMedible = c.producto.esMedible && c.producto.metrosPorUnidad;
+        const cantBase  = Number(c.cantidad);
+        return {
+          nombre:      c.producto.nombre,
+          cantidad:    esMedible ? cantBase * c.producto.metrosPorUnidad : cantBase,
+          unidad:      esMedible ? 'm' : null,
+          fecha:       c.fecha,
+          descripcion: c.descripcion,
+          nServicio,
+          abonado,
+          contrato,
+        };
+      })
+    );
+
+    // Enriquecer recojos con nombre del producto y datos de la orden
+    const recojosEnriquecidos = await Promise.all(
+      recojos.map(async (r) => {
+        let nombreProducto = null, nServicio = null, abonado = null, contrato = null;
+        if (r.productoId) {
+          const prod = await prisma.producto.findUnique({
+            where: { id: r.productoId }, select: { nombre: true },
+          }).catch(() => null);
+          nombreProducto = prod?.nombre ?? null;
+        }
+        if (r.grupoOrden) {
+          const orden = await prisma.ordenServicio.findUnique({
+            where: { id: r.grupoOrden },
+            select: { nServicio: true, abonado: true, contrato: true },
+          }).catch(() => null);
+          if (orden) { nServicio = orden.nServicio; abonado = orden.abonado; contrato = orden.contrato; }
+        }
+        return {
+          id:             r.id,
+          tipoEquipo:     r.tipoEquipo,
+          codigoPon:      r.codigoPon,
+          nombreProducto,
+          estado:         r.estado,
+          comentario:     r.comentario,
+          contrato,
+          nServicio,
+          abonado,
+          fecha:          r.createdAt,
+        };
+      })
+    );
+
+    // Historial unificado (asignaciones + consumos + recojos) ordenado por fecha
+    const historial = [
+      ...entregas.map(e => ({
+        tipo: 'salida', item: e.producto.nombre, cantidad: e.cantidad, fecha: e.fecha,
+      })),
+      ...consumosEnriquecidos.map(c => ({
+        tipo: 'consumo', item: c.nombre, cantidad: c.cantidad, fecha: c.fecha,
+        nServicio: c.nServicio, abonado: c.abonado,
+      })),
+      ...recojosEnriquecidos.map(r => ({
+        tipo: 'envio_salida', item: r.nombreProducto || r.tipoEquipo, cantidad: 1, fecha: r.fecha,
+        nServicio: r.nServicio, abonado: r.abonado,
+      })),
+    ].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
 
     res.json({
       tecnicoId,
@@ -773,10 +879,13 @@ const inventarioTecnico = async (req, res, next) => {
         codigo:    o.producto.codigo,
       })),
       ultimasEntregas: entregas.map(e => ({
-        producto:  e.producto.nombre,
-        cantidad:  e.cantidad,
-        fecha:     e.fecha,
+        producto: e.producto.nombre,
+        cantidad: e.cantidad,
+        fecha:    e.fecha,
       })),
+      consumos:  consumosEnriquecidos,   // ← NUEVO
+      recojos:   recojosEnriquecidos,    // ← NUEVO
+      historial,                         // ← NUEVO
     });
   } catch (err) { next(err); }
 };
