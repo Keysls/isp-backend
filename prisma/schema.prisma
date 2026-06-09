@@ -641,6 +641,7 @@ model PlanInternet {
   updatedAt DateTime       @updatedAt @map("updated_at")
   ordenes   OrdenServicio[]
   sede      Sede           @relation(fields: [sedeId], references: [id])
+  tipoServicio  String  @default("INTERNET") @map("tipo_servicio") @db.VarChar(10)
 
   @@index([sedeId])
   @@map("planes_internet")
