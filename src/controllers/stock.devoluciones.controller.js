@@ -1,7 +1,9 @@
 const prisma = require('../utils/prisma');
 
 // ── POST /api/stock/mi-devolucion ────────────────────────────
-// El técnico registra una devolución de materiales al almacén
+// El técnico registra una devolución. Puede incluir:
+//   - items:   [{ productoId, cantidad }]   material regular sobrante
+//   - recojos: [{ recojoId }]               equipos recogidos de clientes
 const registrarDevolucion = async (req, res, next) => {
   try {
     const usuarioId = req.usuario?.id;
@@ -12,54 +14,91 @@ const registrarDevolucion = async (req, res, next) => {
     if (!tecnico) return res.status(404).json({ error: 'Técnico no encontrado' });
     if (!tecnico.sedeId) return res.status(400).json({ error: 'Técnico sin sede asignada' });
 
-    const { items, comentario } = req.body;
-    // items: [{ productoId, cantidad }]
-    if (!Array.isArray(items) || items.length === 0)
-      return res.status(400).json({ error: 'Debe indicar al menos un item' });
+    const { items = [], recojos = [], comentario } = req.body;
 
-    // Validar que el técnico tenga suficiente stock para devolver
-    const asignaciones = await prisma.asignacionTecnico.findMany({
-      where: { tecnicoId: tecnico.id, sedeId: tecnico.sedeId },
-    });
+    if (items.length === 0 && recojos.length === 0)
+      return res.status(400).json({ error: 'Debe indicar al menos un item o recojo' });
 
-    for (const item of items) {
-      const productoId = Number(item.productoId);
-      const cantidad   = Number(item.cantidad);
-      if (!productoId || cantidad <= 0)
-        return res.status(400).json({ error: 'Producto o cantidad inválidos' });
-
-      const asignacion = asignaciones.find(a => a.productoId === productoId);
-      const disponible = asignacion ? Number(asignacion.cantidad) : 0;
-      if (disponible < cantidad)
-        return res.status(400).json({
-          error: `Stock insuficiente para producto ID ${productoId}. Disponible: ${disponible}`
-        });
+    // ── Validar material regular ─────────────────────────────
+    if (items.length > 0) {
+      const asignaciones = await prisma.asignacionTecnico.findMany({
+        where: { tecnicoId: tecnico.id, sedeId: tecnico.sedeId },
+      });
+      for (const item of items) {
+        const productoId = Number(item.productoId);
+        const cantidad   = Number(item.cantidad);
+        if (!productoId || cantidad <= 0)
+          return res.status(400).json({ error: 'Producto o cantidad inválidos' });
+        const asignacion = asignaciones.find(a => a.productoId === productoId);
+        const disponible = asignacion ? Number(asignacion.cantidad) : 0;
+        if (disponible < cantidad)
+          return res.status(400).json({
+            error: `Stock insuficiente para producto ID ${productoId}. Disponible: ${disponible}`,
+          });
+      }
     }
 
-    // Crear la devolución en estado pendiente
-    const devolucion = await prisma.devolucionTecnico.create({
-      data: {
-        tecnicoId:     tecnico.id,
-        sedeId:        tecnico.sedeId,
-        estado:        'pendiente',
-        comentario:    comentario || null,
-        registradoPor: String(usuarioId),
-        detalles: {
-          create: items.map(item => ({
-            productoId: Number(item.productoId),
-            cantidad:   Number(item.cantidad),
-          })),
+    // ── Validar recojos ──────────────────────────────────────
+    if (recojos.length > 0) {
+      const recojoIds = recojos.map(r => Number(r.recojoId));
+      const encontrados = await prisma.recojo.findMany({
+        where: {
+          id:        { in: recojoIds },
+          tecnicoId: tecnico.id,
+          estado:    'en_mano',
         },
-      },
-      include: { detalles: true },
+      });
+      if (encontrados.length !== recojoIds.length)
+        return res.status(400).json({ error: 'Uno o más recojos no son válidos o ya fueron procesados' });
+    }
+
+    // ── Crear devolución ─────────────────────────────────────
+    const devolucion = await prisma.$transaction(async (tx) => {
+      const dev = await tx.devolucionTecnico.create({
+        data: {
+          tecnicoId:     tecnico.id,
+          sedeId:        tecnico.sedeId,
+          estado:        'pendiente',
+          comentario:    comentario || null,
+          registradoPor: String(usuarioId),
+          ...(items.length > 0 && {
+            detalles: {
+              create: items.map(item => ({
+                productoId: Number(item.productoId),
+                cantidad:   Number(item.cantidad),
+              })),
+            },
+          }),
+        },
+        include: { detalles: true },
+      });
+
+      // Marcar recojos como "en_revision" → ya salieron de mano del técnico
+      if (recojos.length > 0) {
+        await tx.recojo.updateMany({
+          where: {
+            id:        { in: recojos.map(r => Number(r.recojoId)) },
+            tecnicoId: tecnico.id,
+          },
+          data: {
+            estado:    'en_revision',
+            comentario: `Devuelto en devolución #${dev.id}`,
+          },
+        });
+      }
+
+      return dev;
     });
 
-    res.status(201).json({ ok: true, devolucionId: devolucion.id });
+    res.status(201).json({
+      ok:          true,
+      devolucionId: devolucion.id,
+      recojosPendientes: recojos.length,
+    });
   } catch (err) { next(err); }
 };
 
 // ── GET /api/stock/mis-devoluciones ─────────────────────────
-// El técnico ve sus devoluciones y sus estados
 const misDevoluciones = async (req, res, next) => {
   try {
     const usuarioId = req.usuario?.id;
@@ -80,24 +119,117 @@ const misDevoluciones = async (req, res, next) => {
       take:    50,
     });
 
-    res.json(devoluciones.map(d => ({
-      id:            d.id,
-      estado:        d.estado,
-      comentario:    d.comentario,
-      fecha:         d.createdAt,
-      fechaRevision: d.fechaRevision,
-      detalles:      d.detalles.map(det => ({
-        productoId: det.productoId,
-        nombre:     det.producto.nombre,
-        unidad:     det.producto.unidad,
-        cantidad:   Number(det.cantidad),
-      })),
-    })));
+    // Incluir recojos en_revision asociados a cada devolución
+    // Los recojos llevan el comentario "Devuelto en devolución #ID"
+    const idsDevolucion = devoluciones.map(d => d.id);
+    const recojosRevision = await prisma.recojo.findMany({
+      where: {
+        tecnicoId: tecnico.id,
+        estado:    'en_revision',
+        comentario: { in: idsDevolucion.map(id => `Devuelto en devolución #${id}`) },
+      },
+      include: { onusRecicladas: { select: { estado: true } } },
+    });
+
+    res.json(devoluciones.map(d => {
+      const recojosAsociados = recojosRevision.filter(
+        r => r.comentario === `Devuelto en devolución #${d.id}`
+      );
+      return {
+        id:            d.id,
+        estado:        d.estado,
+        comentario:    d.comentario,
+        fecha:         d.createdAt,
+        fechaRevision: d.fechaRevision,
+        detalles: d.detalles.map(det => ({
+          productoId: det.productoId,
+          nombre:     det.producto.nombre,
+          unidad:     det.producto.unidad,
+          cantidad:   Number(det.cantidad),
+        })),
+        recojos: recojosAsociados.map(r => ({
+          id:            r.id,
+          tipoEquipo:    r.tipoEquipo,
+          codigoPon:     r.codigoPon,
+          estado:        r.estado,
+        })),
+      };
+    }));
+  } catch (err) { next(err); }
+};
+
+// ── GET /api/stock/devoluciones ──────────────────────────────
+// Admin lista todas las devoluciones pendientes de su sede
+const listarDevoluciones = async (req, res, next) => {
+  try {
+    const { sedeId: miSede, rol } = req.usuario;
+    const { estado = 'pendiente' } = req.query;
+
+    const where = {
+      ...(rol === 'ADMIN' && { sedeId: miSede }),
+      ...(estado && { estado }),
+    };
+
+    const devoluciones = await prisma.devolucionTecnico.findMany({
+      where,
+      include: {
+        tecnico: {
+          include: { usuario: { select: { nombre: true, apellido: true } } },
+        },
+        detalles: {
+          include: { producto: { select: { nombre: true, unidad: true } } },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Enriquecer con recojos en_revision asociados
+    const data = await Promise.all(devoluciones.map(async (d) => {
+      const recojosAsociados = await prisma.recojo.findMany({
+        where: {
+          tecnicoId:  d.tecnicoId,
+          estado:     { in: ['en_revision', 'entregado', 'malogrado'] },
+          comentario: `Devuelto en devolución #${d.id}`,
+        },
+        include: {
+          onusRecicladas: { select: { id: true, estado: true } },
+        },
+      });
+
+      return {
+        id:            d.id,
+        estado:        d.estado,
+        comentario:    d.comentario,
+        fecha:         d.createdAt,
+        fechaRevision: d.fechaRevision,
+        revisadoPor:   d.revisadoPor,
+        tecnico: {
+          id:       d.tecnico.id,
+          nombre:   d.tecnico.usuario.nombre,
+          apellido: d.tecnico.usuario.apellido,
+        },
+        detalles: d.detalles.map(det => ({
+          productoId: det.productoId,
+          nombre:     det.producto.nombre,
+          unidad:     det.producto.unidad,
+          cantidad:   Number(det.cantidad),
+        })),
+        recojos: recojosAsociados.map(r => ({
+          id:         r.id,
+          tipoEquipo: r.tipoEquipo,
+          codigoPon:  r.codigoPon,
+          estado:     r.estado,
+        })),
+      };
+    }));
+
+    res.json(data);
   } catch (err) { next(err); }
 };
 
 // ── POST /api/stock/devoluciones/:id/aprobar ─────────────────
-// Admin aprueba → mueve stock al almacén
+// Admin aprueba material regular → mueve stock
+// Los recojos se procesan individualmente con /recojos/:id/revisar
 const aprobarDevolucion = async (req, res, next) => {
   try {
     const devolucionId = Number(req.params.id);
@@ -118,28 +250,19 @@ const aprobarDevolucion = async (req, res, next) => {
 
         // 1. Descontar de AsignacionTecnico
         await tx.asignacionTecnico.updateMany({
-          where: {
-            tecnicoId:  devolucion.tecnicoId,
-            productoId,
-            sedeId:     devolucion.sedeId,
-          },
-          data: { cantidad: { decrement: cantidad } },
+          where: { tecnicoId: devolucion.tecnicoId, productoId, sedeId: devolucion.sedeId },
+          data:  { cantidad: { decrement: cantidad } },
         });
 
         // 2. Sumar al StockSede
         await tx.stockSede.upsert({
-          where: {
-            sedeId_productoId: {
-              sedeId:    devolucion.sedeId,
-              productoId,
-            },
-          },
+          where:  { sedeId_productoId: { sedeId: devolucion.sedeId, productoId } },
           create: { sedeId: devolucion.sedeId, productoId, cantidad },
           update: { cantidad: { increment: cantidad } },
         });
       }
 
-      // 3. Marcar como aprobada
+      // 3. Marcar devolución como aprobada
       await tx.devolucionTecnico.update({
         where: { id: devolucionId },
         data: {
@@ -155,7 +278,6 @@ const aprobarDevolucion = async (req, res, next) => {
 };
 
 // ── POST /api/stock/devoluciones/:id/rechazar ────────────────
-// Admin rechaza — no mueve stock
 const rechazarDevolucion = async (req, res, next) => {
   try {
     const devolucionId = Number(req.params.id);
@@ -164,29 +286,112 @@ const rechazarDevolucion = async (req, res, next) => {
     const devolucion = await prisma.devolucionTecnico.findUnique({
       where: { id: devolucionId },
     });
-
     if (!devolucion)
       return res.status(404).json({ error: 'Devolución no encontrada' });
     if (devolucion.estado !== 'pendiente')
       return res.status(400).json({ error: 'La devolución ya fue procesada' });
 
-    await prisma.devolucionTecnico.update({
-      where: { id: devolucionId },
-      data: {
-        estado:        'rechazado',
-        comentario:    motivo || devolucion.comentario,
-        revisadoPor:   String(req.usuario.id),
-        fechaRevision: new Date(),
-      },
+    // Devolver los recojos a "en_mano" si se rechaza
+    await prisma.$transaction(async (tx) => {
+      await tx.recojo.updateMany({
+        where: {
+          tecnicoId:  devolucion.tecnicoId,
+          estado:     'en_revision',
+          comentario: `Devuelto en devolución #${devolucionId}`,
+        },
+        data: { estado: 'en_mano', comentario: null },
+      });
+
+      await tx.devolucionTecnico.update({
+        where: { id: devolucionId },
+        data: {
+          estado:        'rechazado',
+          comentario:    motivo || devolucion.comentario,
+          revisadoPor:   String(req.usuario.id),
+          fechaRevision: new Date(),
+        },
+      });
     });
 
     res.json({ ok: true, message: 'Devolución rechazada' });
   } catch (err) { next(err); }
 };
 
+// ── POST /api/stock/recojos/:id/revisar ──────────────────────
+// Admin revisa un recojo físicamente: bueno → entra al stock | malogrado → descartado
+const revisarRecojo = async (req, res, next) => {
+  try {
+    const recojoId = Number(req.params.id);
+    const { resultado, comentario } = req.body; // resultado: 'bueno' | 'malogrado'
+
+    if (!['bueno', 'malogrado'].includes(resultado))
+      return res.status(400).json({ error: 'resultado debe ser "bueno" o "malogrado"' });
+
+    const recojo = await prisma.recojo.findUnique({
+      where: { id: recojoId },
+    });
+    if (!recojo)
+      return res.status(404).json({ error: 'Recojo no encontrado' });
+    if (!['en_revision', 'en_mano'].includes(recojo.estado))
+      return res.status(400).json({ error: `El recojo ya fue procesado (estado: ${recojo.estado})` });
+
+    await prisma.$transaction(async (tx) => {
+      if (resultado === 'bueno' && recojo.productoId) {
+        // Encontrar la sede del técnico
+        const tecnico = await tx.tecnico.findUnique({
+          where:  { id: recojo.tecnicoId },
+          select: { sedeId: true },
+        });
+        const sedeId = tecnico?.sedeId;
+
+        if (sedeId) {
+          // Sumar al StockSede como unidad reciclada
+          await tx.stockSede.upsert({
+            where:  { sedeId_productoId: { sedeId, productoId: recojo.productoId } },
+            create: { sedeId, productoId: recojo.productoId, cantidad: 1 },
+            update: { cantidad: { increment: 1 } },
+          });
+
+          // Registrar en OnuReciclada para trazabilidad
+          await tx.onuReciclada.create({
+            data: {
+              recojoId:   recojo.id,
+              tipoEquipo: recojo.tipoEquipo || 'ONU',
+              codigoPon:  recojo.codigoPon  || null,
+              productoId: recojo.productoId,
+              sedeId,
+              estado:     'revision',
+              comentario: comentario || 'Aprobado por admin',
+              revisadoPor: String(req.usuario.id),
+            },
+          });
+        }
+      }
+
+      // Actualizar estado del recojo
+      await tx.recojo.update({
+        where: { id: recojoId },
+        data: {
+          estado:    resultado === 'bueno' ? 'entregado' : 'malogrado',
+          comentario: comentario || recojo.comentario,
+        },
+      });
+    });
+
+    res.json({
+      ok:      true,
+      message: resultado === 'bueno'
+        ? '✅ Equipo aprobado — ingresó al stock'
+        : '❌ Equipo descartado',
+    });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   registrarDevolucion,
   misDevoluciones,
+  listarDevoluciones,
   aprobarDevolucion,
   rechazarDevolucion,
+  revisarRecojo,
 };

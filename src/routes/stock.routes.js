@@ -4,8 +4,10 @@ const { authMiddleware, requireRol } = require('../middleware/auth.middleware');
 const {
   registrarDevolucion,
   misDevoluciones,
+  listarDevoluciones,
   aprobarDevolucion,
   rechazarDevolucion,
+  revisarRecojo,
 } = require('../controllers/stock.devoluciones.controller');
 
 
@@ -30,9 +32,11 @@ router.post('/mi-retiro',         requireRol('TECNICO'), ctrl.registrarRetiro);
 router.get('/catalogo',           requireRol('TECNICO'), ctrl.catalogoTecnico);
 router.get('/auditoria', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.auditoriaControlador);
 
-router.post('/mi-devolucion',             requireRol('TECNICO'),                          registrarDevolucion);
-router.get('/mis-devoluciones',           requireRol('TECNICO'),                          misDevoluciones);
-router.post('/devoluciones/:id/aprobar',  requireRol('SUPERADMIN', 'ADMIN'),              aprobarDevolucion);
-router.post('/devoluciones/:id/rechazar', requireRol('SUPERADMIN', 'ADMIN'),              rechazarDevolucion);
+router.post('/mi-devolucion',              requireRol('TECNICO'),                         registrarDevolucion);
+router.get('/mis-devoluciones',            requireRol('TECNICO'),                         misDevoluciones);
+router.get('/devoluciones',                requireRol('SUPERADMIN', 'ADMIN'),             listarDevoluciones);
+router.post('/devoluciones/:id/aprobar',   requireRol('SUPERADMIN', 'ADMIN'),             aprobarDevolucion);
+router.post('/devoluciones/:id/rechazar',  requireRol('SUPERADMIN', 'ADMIN'),             rechazarDevolucion);
+router.post('/recojos/:id/revisar',        requireRol('SUPERADMIN', 'ADMIN'),             revisarRecojo);
 
 module.exports = router;

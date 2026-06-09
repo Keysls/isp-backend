@@ -1126,6 +1126,23 @@ const registrarConsumo = async (req, res, next) => {
         },
       }))
     );
+ 
+    // ── Marcar recojos como "usado" si el producto consumido era un recojo en_mano ──
+    // Si el técnico usó un producto que tenía como recojo, ese recojo ya no está disponible
+    const productosConsumidos = itemsNormalizados.map(i => i.productoId);
+    if (productosConsumidos.length > 0) {
+      await prisma.recojo.updateMany({
+        where: {
+          tecnicoId:  tecnico.id,
+          estado:     'en_mano',
+          productoId: { in: productosConsumidos },
+        },
+        data: {
+          estado:    'usado',
+          comentario: ordenId ? `Usado en orden: ${ordenId}` : 'Usado en servicio',
+        },
+      });
+    }
 
     res.status(201).json({ ok: true, registrados: registros.length });
   } catch (err) { next(err); }
