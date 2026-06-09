@@ -123,17 +123,35 @@ const misDevoluciones = async (req, res, next) => {
     // Los recojos llevan el comentario "Devuelto en devolución #ID"
     const idsDevolucion = devoluciones.map(d => d.id);
     const recojosRevision = await prisma.recojo.findMany({
-      where: {
-        tecnicoId: tecnico.id,
-        estado:    { in: ['en_revision', 'entregado', 'malogrado'] },
-        comentario: { in: idsDevolucion.map(id => `Devuelto en devolución #${id}`) },
-      },
-      include: {
-        onusRecicladas: { select: { estado: true } },
-        producto:       { select: { nombre: true } },  // ← AGREGAR
-      },
+  where: {
+    tecnicoId: tecnico.id,
+    estado:    { in: ['en_revision', 'entregado', 'malogrado'] },
+    comentario: { in: idsDevolucion.map(id => `Devuelto en devolución #${id}`) },
+  },
+  include: {
+    onusRecicladas: { select: { estado: true } },
+  },
     });
 
+    // Obtener nombres de productos por separado
+    const productoIds = [...new Set(recojosRevision.map(r => r.productoId).filter(Boolean))];
+    const productos = productoIds.length > 0
+      ? await prisma.producto.findMany({
+          where: { id: { in: productoIds } },
+          select: { id: true, nombre: true },
+        })
+      : [];
+    const nombresProductos = Object.fromEntries(productos.map(p => [p.id, p.nombre]));
+
+    // Obtener contrato y abonado desde la orden asociada al recojo
+    const grupoOrdenIds = [...new Set(recojosRevision.map(r => r.grupoOrden).filter(Boolean))];
+    const ordenes = grupoOrdenIds.length > 0
+      ? await prisma.ordenServicio.findMany({
+          where:  { id: { in: grupoOrdenIds } },
+          select: { id: true, contrato: true, abonado: true },
+        })
+      : [];
+    const datosOrden = Object.fromEntries(ordenes.map(o => [o.id, { contrato: o.contrato, abonado: o.abonado }]));
     res.json(devoluciones.map(d => {
       const recojosAsociados = recojosRevision.filter(
         r => r.comentario === `Devuelto en devolución #${d.id}`
@@ -155,13 +173,14 @@ const misDevoluciones = async (req, res, next) => {
           tipoEquipo:     r.tipoEquipo,
           codigoPon:      r.codigoPon,
           estado:         r.estado,
-          nombreProducto: r.producto?.nombre || null,  // ← AGREGAR
-          nServicio:      r.grupoOrden       || null,  // ← AGREGAR (grupoOrden guarda el nServicio de la orden de retiro)
+          nombreProducto: r.productoId ? (nombresProductos[r.productoId] || null) : null,
+          contrato:       r.grupoOrden ? (datosOrden[r.grupoOrden]?.contrato || null) : null,
+          abonado:        r.grupoOrden ? (datosOrden[r.grupoOrden]?.abonado  || null) : null,
         })),
-      };
-    }));
-  } catch (err) { next(err); }
-};
+              };
+            }));
+          } catch (err) { next(err); }
+        };
 
 // ── GET /api/stock/devoluciones ──────────────────────────────
 // Admin lista todas las devoluciones pendientes de su sede
@@ -189,46 +208,67 @@ const listarDevoluciones = async (req, res, next) => {
     });
 
     // Enriquecer con recojos en_revision asociados
-    const data = await Promise.all(devoluciones.map(async (d) => {
-      const recojosAsociados = await prisma.recojo.findMany({
+    // Traer todos los recojos de todas las devoluciones en UNA sola query
+      const todosLosIds = devoluciones.map(d => d.id);
+      const todosRecojos = await prisma.recojo.findMany({
         where: {
-          tecnicoId:  d.tecnicoId,
           estado:     { in: ['en_revision', 'entregado', 'malogrado'] },
-          comentario: `Devuelto en devolución #${d.id}`,
+          comentario: { in: todosLosIds.map(id => `Devuelto en devolución #${id}`) },
         },
-        include: {
-          onusRecicladas: { select: { id: true, estado: true } },
-        },
+        include: { onusRecicladas: { select: { id: true, estado: true } } },
       });
 
-      return {
-        id:            d.id,
-        estado:        d.estado,
-        comentario:    d.comentario,
-        fecha:         d.createdAt,
-        fechaRevision: d.fechaRevision,
-        revisadoPor:   d.revisadoPor,
-        tecnico: {
-          id:       d.tecnico.id,
-          nombre:   d.tecnico.usuario.nombre,
-          apellido: d.tecnico.usuario.apellido,
-        },
-        detalles: d.detalles.map(det => ({
-          productoId: det.productoId,
-          nombre:     det.producto.nombre,
-          unidad:     det.producto.unidad,
-          cantidad:   Number(det.cantidad),
-        })),
-        recojos: recojosAsociados.map(r => ({
-          id:             r.id,
-          tipoEquipo:     r.tipoEquipo,
-          codigoPon:      r.codigoPon,
-          estado:         r.estado,
-          nombreProducto: r.producto?.nombre || null,   // ← AGREGAR
-          nServicio:      r.grupoOrden || null,          // ← AGREGAR (grupoOrden guarda el nServicio)
-      })),
-      };
-    }));
+      // Nombres de productos en UNA sola query
+      const productoIdsAll = [...new Set(todosRecojos.map(r => r.productoId).filter(Boolean))];
+      const productosAll   = productoIdsAll.length > 0
+        ? await prisma.producto.findMany({
+            where:  { id: { in: productoIdsAll } },
+            select: { id: true, nombre: true },
+          })
+        : [];
+      const nombresAll = Object.fromEntries(productosAll.map(p => [p.id, p.nombre]));
+
+      const grupoOrdenIdsAll = [...new Set(todosRecojos.map(r => r.grupoOrden).filter(Boolean))];
+        const ordenesAll = grupoOrdenIdsAll.length > 0
+          ? await prisma.ordenServicio.findMany({
+              where:  { id: { in: grupoOrdenIdsAll } },
+              select: { id: true, contrato: true, abonado: true },
+            })
+          : [];
+        const datosOrdenAll = Object.fromEntries(ordenesAll.map(o => [o.id, { contrato: o.contrato, abonado: o.abonado }]));
+      const data = devoluciones.map(d => {
+        const recojosAsociados = todosRecojos.filter(
+          r => r.comentario === `Devuelto en devolución #${d.id}`
+        );
+        return {
+          id:            d.id,
+          estado:        d.estado,
+          comentario:    d.comentario,
+          fecha:         d.createdAt,
+          fechaRevision: d.fechaRevision,
+          revisadoPor:   d.revisadoPor,
+          tecnico: {
+            id:       d.tecnico.id,
+            nombre:   d.tecnico.usuario.nombre,
+            apellido: d.tecnico.usuario.apellido,
+          },
+          detalles: d.detalles.map(det => ({
+            productoId: det.productoId,
+            nombre:     det.producto.nombre,
+            unidad:     det.producto.unidad,
+            cantidad:   Number(det.cantidad),
+          })),
+          recojos: recojosAsociados.map(r => ({
+            id:             r.id,
+            tipoEquipo:     r.tipoEquipo,
+            codigoPon:      r.codigoPon,
+            estado:         r.estado,
+            nombreProducto: r.productoId ? (nombresAll[r.productoId] || null) : null,
+            contrato:       r.grupoOrden ? (datosOrdenAll[r.grupoOrden]?.contrato || null) : null,
+            abonado:        r.grupoOrden ? (datosOrdenAll[r.grupoOrden]?.abonado  || null) : null,
+          })),
+        };
+      });
 
     res.json(data);
   } catch (err) { next(err); }
