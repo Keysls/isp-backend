@@ -125,7 +125,7 @@ const misDevoluciones = async (req, res, next) => {
     const recojosRevision = await prisma.recojo.findMany({
       where: {
         tecnicoId: tecnico.id,
-        estado:    'en_revision',
+        estado:    { in: ['en_revision', 'entregado', 'malogrado'] },  // ← todos los estados
         comentario: { in: idsDevolucion.map(id => `Devuelto en devolución #${id}`) },
       },
       include: { onusRecicladas: { select: { estado: true } } },
@@ -368,12 +368,13 @@ const revisarRecojo = async (req, res, next) => {
       }
 
       // Descontar del inventario del técnico (siempre: bueno o malogrado)
-      if (recojo.productoId && sedeId) {
-        await tx.asignacionTecnico.updateMany({
-          where: { tecnicoId: recojo.tecnicoId, productoId: recojo.productoId, sedeId },
-          data:  { cantidad: { decrement: 1 } },
-        });
-      }
+      // Descontar del inventario del técnico (siempre: bueno o malogrado)
+        if (recojo.productoId) {
+          await tx.asignacionTecnico.updateMany({
+            where: { tecnicoId: recojo.tecnicoId, productoId: recojo.productoId },
+            data:  { cantidad: { decrement: 1 } },
+          });
+        }
 
       // Actualizar estado del recojo
       await tx.recojo.update({
