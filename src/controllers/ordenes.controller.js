@@ -374,46 +374,74 @@ const confirmarExcel = async (req, res, next) => {
         const asignar = tecnicoValidado && !TIPOS_SOLO_NOC.includes(o.tipoOrden);
 
         const ordenCreada = await prisma.$transaction(async (tx) => {
-          // 1. Upsert del contrato (crea o actualiza datos del cliente)
-          await upsertContratoDesdeOrden(tx, o, sedeId);
-
-          // 2. ¿El contrato ya tiene WAN? Si sí y hay técnico, la orden la hereda
-          const wanHeredada = await wanHeredableDelContrato(tx, o.contrato, o.tipoOrden, asignar);
-
-          // 3. Estado inicial: si hereda WAN → PENDIENTE_TECNICO; si no, flujo normal
-          const estadoInicial = wanHeredada
-            ? 'PENDIENTE_TECNICO'
-            : (TIPOS_NOC.includes(o.tipoOrden) ? 'PENDIENTE_NOC' : 'PENDIENTE_TECNICO');
-
-          // 4. Crear la orden enlazada al contrato
-          return tx.ordenServicio.create({
-            data: {
-              nServicio:     String(o.nServicio),
-              tipoOrden:     o.tipoOrden,
-              estado:        estadoInicial,
-              fechaServicio: new Date(o.fechaServicio),
-              contrato:      o.contrato || null,
-              abonado:       o.abonado,
-              dni:           o.dni,
-              direccion:     o.direccion,
-              referencia:    o.referencia,
-              sector:        o.sector,
-              celular:       o.celular || '',
-              observacion:   o.observacion,
-              sedeId,
-              ...(asignar && {
-                tecnicoId:       tecnicoValidado.id,
-                fechaAsignacion: new Date(),
-              }),
-              ...(wanHeredada && {
-                ipWan:    wanHeredada.ipWan,
-                mascara:  wanHeredada.mascara,
-                gateway:  wanHeredada.gateway,
-                fechaWan: new Date(),
-              }),
-            },
+            // 1. Upsert del contrato (crea o actualiza datos del cliente)
+            await upsertContratoDesdeOrden(tx, o, sedeId);
+          
+            // 2. ¿El contrato ya tiene WAN? Si sí y hay técnico, la orden la hereda
+            const wanHeredada = await wanHeredableDelContrato(tx, o.contrato, o.tipoOrden, asignar);
+          
+            // 3. Estado inicial: si hereda WAN → PENDIENTE_TECNICO; si no, flujo normal
+            const estadoInicial = wanHeredada
+              ? 'PENDIENTE_TECNICO'
+              : (TIPOS_NOC.includes(o.tipoOrden) ? 'PENDIENTE_NOC' : 'PENDIENTE_TECNICO');
+          
+            // ── NUEVO: resolver plan desde mensualidad ──────────────────
+            let planId = null;
+            let mbps   = null;
+          
+            if (o.mensualidad != null && !isNaN(o.mensualidad)) {
+              // Solo aplica a órdenes de Internet o Dúo
+              const esInternet = o.tipoOrden.endsWith('_I') || o.tipoOrden.endsWith('_D');
+              if (esInternet) {
+                const plan = await tx.planInternet.findFirst({
+                  where: {
+                    sedeId,
+                    activo: true,
+                    precio: { equals: o.mensualidad },
+                  },
+                });
+                if (plan) {
+                  planId = plan.id;
+                  mbps   = plan.mbps;
+                }
+              }
+            }
+            // ────────────────────────────────────────────────────────────
+          
+            // 4. Crear la orden enlazada al contrato
+            return tx.ordenServicio.create({
+              data: {
+                nServicio:     String(o.nServicio),
+                tipoOrden:     o.tipoOrden,
+                estado:        estadoInicial,
+                fechaServicio: new Date(o.fechaServicio),
+                contrato:      o.contrato || null,
+                abonado:       o.abonado,
+                dni:           o.dni,
+                direccion:     o.direccion,
+                referencia:    o.referencia,
+                sector:        o.sector,
+                celular:       o.celular || '',
+                observacion:   o.observacion,
+                sedeId,
+                // ── NUEVO ──────────────────────────────────────────────
+                ...(o.mensualidad != null && { mensualidad: o.mensualidad }),
+                ...(mbps   != null && { mbps }),
+                ...(planId != null && { planId }),
+                // ───────────────────────────────────────────────────────
+                ...(asignar && {
+                  tecnicoId:       tecnicoValidado.id,
+                  fechaAsignacion: new Date(),
+                }),
+                ...(wanHeredada && {
+                  ipWan:    wanHeredada.ipWan,
+                  mascara:  wanHeredada.mascara,
+                  gateway:  wanHeredada.gateway,
+                  fechaWan: new Date(),
+                }),
+              },
+            });
           });
-        });
 
         // Notificar al NOC si quedó esperando WAN con técnico asignado
         if (ordenCreada.estado === 'PENDIENTE_NOC' && ordenCreada.tecnicoId) {

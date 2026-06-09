@@ -15,17 +15,22 @@ function parsearExcelOrdenes(rutaArchivo) {
   for (let i = 0; i < filas.length; i++) {
     const f = filas[i];
 
-    const nOrden     = limpiar(f['Nº de Orden']  || f['N° de Orden'] || f['Nde Orden'] || '');
-    const abonado    = limpiar(f['Abonado']       || '');
-    const direccion  = limpiar(f['Direccion']     || f['Dirección']  || '');
-    const referencia = limpiar(f['Referencia']    || '');
-    const sector     = limpiar(f['Sector']        || '');
-    const servicio   = limpiar(f['Servicio']      || '');
-    const dni        = limpiar(f['Doc. Identidad']|| '');
-    const telefono   = limpiar(f['Telefono']      || f['Teléfono']   || '');
-    const contrato   = limpiar(f['Nº Contrato']   || f['N° Contrato']|| '');
-    const fechaRaw   = f['Fecha Crea'] || f['Fecha Asigna'] || '';
+    const nOrden      = limpiar(f['Nº de Orden']  || f['N° de Orden'] || f['Nde Orden'] || '');
+    const abonado     = limpiar(f['Abonado']       || '');
+    const direccion   = limpiar(f['Direccion']     || f['Dirección']  || '');
+    const referencia  = limpiar(f['Referencia']    || '');
+    const sector      = limpiar(f['Sector']        || '');
+    const servicio    = limpiar(f['Servicio']      || '');
+    const dni         = limpiar(f['Doc. Identidad']|| '');
+    const telefono    = limpiar(f['Telefono']      || f['Teléfono']   || '');
+    const contrato    = limpiar(f['Nº Contrato']   || f['N° Contrato']|| '');
+    const fechaRaw    = f['Fecha Crea'] || f['Fecha Asigna'] || '';
     const observacion = limpiar(f['Observacion Inicial'] || '');
+
+    // ── NUEVO: leer mensualidad ───────────────────────────────
+    const mensualidadRaw = f['Mensualidad'] || f['mensualidad'] || f['MENSUALIDAD'] || '';
+    const mensualidad = mensualidadRaw !== '' ? parseFloat(String(mensualidadRaw).replace(',', '.')) : null;
+    // ─────────────────────────────────────────────────────────
 
     if (!nOrden || !abonado || !direccion) {
       errores.push({ fila: i + 3, motivo: 'Faltan campos requeridos (N° Orden, Abonado, Dirección)' });
@@ -76,6 +81,7 @@ function parsearExcelOrdenes(rutaArchivo) {
       celular:      celular    || '',
       observacion:  observacion || null,
       tipoOrden,
+      mensualidad:  (!isNaN(mensualidad) && mensualidad !== null) ? mensualidad : null, // NUEVO
       esInternet: tipoOrden.endsWith('_I') || tipoOrden.endsWith('_D'),
       esCable:    tipoOrden.endsWith('_C') || tipoOrden.endsWith('_D'),
     });
@@ -177,47 +183,37 @@ function limpiar(val) {
   return String(val).trim().replace(/\s+/g, ' ');
 }
 
-// ── Parser del Excel de Contratos ─────────────────────────────
-// Formato: fila 1 = título, fila 2 = encabezados, fila 3+ = datos.
-// Columnas usadas: Contrato, Doc Identidad, Abonado, Direccion,
-// Referencia, Sector, Nº de Celular, Tipo de Contrato.
+// ── Parser del Excel de Contratos ────────────────────────────────────────────
 const parsearExcelContratos = (rutaArchivo) => {
   const XLSX = require('xlsx');
   const workbook = XLSX.readFile(rutaArchivo);
   const hoja = workbook.Sheets[workbook.SheetNames[0]];
 
-  // Leer como matriz de filas (header:1 = array de arrays)
   const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: '' });
-
-  // Fila 0 = título, fila 1 = encabezados, fila 2+ = datos
   const filasDatos = filas.slice(2);
 
-  // Índice de cada columna según su posición (formato fijo del reporte)
   const COL = {
-    contrato:   0,   // "Contrato"
-    dni:        1,   // "Doc Identidad"
-    abonado:    2,   // "Abonado"
-    direccion:  3,   // "Direccion"
-    referencia: 4,   // "Referencia"
-    sector:     5,   // "Sector"
-    celular:    13,  // "Nº de Celular"
-    tipo:       19,  // "Tipo de Contrato"
+    contrato:   0,
+    dni:        1,
+    abonado:    2,
+    direccion:  3,
+    referencia: 4,
+    sector:     5,
+    celular:    13,
+    tipo:       19,
   };
 
-  // Helper: limpia un valor de celda
   const limpiar = (v) => {
     if (v === null || v === undefined) return '';
     return String(v).trim();
   };
 
-  // Helper: trata vacío o "0" como null
   const limpiarOpcional = (v) => {
     const s = limpiar(v);
     if (!s || s === '0') return null;
     return s;
   };
 
-  // Mapea "INTERNET"/"CABLE" del Excel al enum TipoServicio
   const mapearTipo = (v) => {
     const s = limpiar(v).toUpperCase();
     if (s === 'INTERNET') return 'INTERNET';
@@ -229,10 +225,8 @@ const parsearExcelContratos = (rutaArchivo) => {
   const errores   = [];
 
   filasDatos.forEach((fila, i) => {
-    const numeroExcel = i + 3;  // fila real en el Excel (1-indexed)
-
+    const numeroExcel = i + 3;
     const numero = limpiar(fila[COL.contrato]);
-    // Fila sin número de contrato → se descarta (suele ser fila vacía al final)
     if (!numero) return;
 
     const abonado = limpiar(fila[COL.abonado]);
@@ -248,11 +242,11 @@ const parsearExcelContratos = (rutaArchivo) => {
     }
 
     contratos.push({
-      numero,                                              // tal cual viene
+      numero,
       abonado,
       direccion,
       dni:          limpiarOpcional(fila[COL.dni]),
-      referencia:   limpiarOpcional(fila[COL.referencia]), // "0" → null
+      referencia:   limpiarOpcional(fila[COL.referencia]),
       sector:       limpiarOpcional(fila[COL.sector]),
       celular:      limpiarOpcional(fila[COL.celular]),
       tipoServicio: mapearTipo(fila[COL.tipo]),

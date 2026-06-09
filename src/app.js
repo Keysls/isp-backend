@@ -49,6 +49,9 @@ app.use('/api/olt',             require('./routes/olt/olt.routes'));
 app.use('/api/contratos',       require('./routes/contratos.routes'));
 app.use('/api/puntos-red',      require('./routes/puntosRed.routes'));
 app.use('/api/notificaciones',  require('./routes/notificaciones.routes'));
+app.use('/api/planes',          require('./routes/planes.routes'));
+
+ 
 // ─── Rutas de inventario ────────────────────────────────────────
 app.use('/api/productos',       require('./routes/productos.routes'));
 app.use('/api/stock',           require('./routes/stock.routes'));
