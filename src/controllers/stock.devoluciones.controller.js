@@ -125,10 +125,13 @@ const misDevoluciones = async (req, res, next) => {
     const recojosRevision = await prisma.recojo.findMany({
       where: {
         tecnicoId: tecnico.id,
-        estado:    { in: ['en_revision', 'entregado', 'malogrado'] },  // ← todos los estados
+        estado:    { in: ['en_revision', 'entregado', 'malogrado'] },
         comentario: { in: idsDevolucion.map(id => `Devuelto en devolución #${id}`) },
       },
-      include: { onusRecicladas: { select: { estado: true } } },
+      include: {
+        onusRecicladas: { select: { estado: true } },
+        producto:       { select: { nombre: true } },  // ← AGREGAR
+      },
     });
 
     res.json(devoluciones.map(d => {
@@ -148,10 +151,12 @@ const misDevoluciones = async (req, res, next) => {
           cantidad:   Number(det.cantidad),
         })),
         recojos: recojosAsociados.map(r => ({
-          id:            r.id,
-          tipoEquipo:    r.tipoEquipo,
-          codigoPon:     r.codigoPon,
-          estado:        r.estado,
+          id:             r.id,
+          tipoEquipo:     r.tipoEquipo,
+          codigoPon:      r.codigoPon,
+          estado:         r.estado,
+          nombreProducto: r.producto?.nombre || null,  // ← AGREGAR
+          nServicio:      r.grupoOrden       || null,  // ← AGREGAR (grupoOrden guarda el nServicio de la orden de retiro)
         })),
       };
     }));
@@ -215,11 +220,13 @@ const listarDevoluciones = async (req, res, next) => {
           cantidad:   Number(det.cantidad),
         })),
         recojos: recojosAsociados.map(r => ({
-          id:         r.id,
-          tipoEquipo: r.tipoEquipo,
-          codigoPon:  r.codigoPon,
-          estado:     r.estado,
-        })),
+          id:             r.id,
+          tipoEquipo:     r.tipoEquipo,
+          codigoPon:      r.codigoPon,
+          estado:         r.estado,
+          nombreProducto: r.producto?.nombre || null,   // ← AGREGAR
+          nServicio:      r.grupoOrden || null,          // ← AGREGAR (grupoOrden guarda el nServicio)
+      })),
       };
     }));
 
