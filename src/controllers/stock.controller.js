@@ -945,12 +945,14 @@ const miInventario = async (req, res, next) => {
       }),
       // Recojos: equipos recuperados de clientes por el técnico
       prisma.recojo.findMany({
-        where: { tecnicoId },
-        include: {
-          onusRecicladas: false,
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
+          where: { 
+              tecnicoId,
+              estado: 'en_mano',   // ← solo los que tiene en mano
+          },
+          include: {
+              onusRecicladas: false,
+          },
+          orderBy: { createdAt: 'desc' },
       }),
     ]);
 
