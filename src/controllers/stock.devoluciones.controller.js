@@ -336,43 +336,50 @@ const revisarRecojo = async (req, res, next) => {
       return res.status(400).json({ error: `El recojo ya fue procesado (estado: ${recojo.estado})` });
 
     await prisma.$transaction(async (tx) => {
-      if (resultado === 'bueno' && recojo.productoId) {
-        // Encontrar la sede del técnico
-        const tecnico = await tx.tecnico.findUnique({
-          where:  { id: recojo.tecnicoId },
-          select: { sedeId: true },
+      // Una sola búsqueda del técnico
+      const tecnico = recojo.productoId
+        ? await tx.tecnico.findUnique({
+            where:  { id: recojo.tecnicoId },
+            select: { sedeId: true },
+          })
+        : null;
+      const sedeId = tecnico?.sedeId;
+
+      if (resultado === 'bueno' && recojo.productoId && sedeId) {
+        // Sumar al StockSede
+        await tx.stockSede.upsert({
+          where:  { sedeId_productoId: { sedeId, productoId: recojo.productoId } },
+          create: { sedeId, productoId: recojo.productoId, cantidad: 1 },
+          update: { cantidad: { increment: 1 } },
         });
-        const sedeId = tecnico?.sedeId;
+        // Registrar en OnuReciclada
+        await tx.onuReciclada.create({
+          data: {
+            recojoId:    recojo.id,
+            tipoEquipo:  recojo.tipoEquipo || 'ONU',
+            codigoPon:   recojo.codigoPon  || null,
+            productoId:  recojo.productoId,
+            sedeId,
+            estado:      'revision',
+            comentario:  comentario || 'Aprobado por admin',
+            revisadoPor: String(req.usuario.id),
+          },
+        });
+      }
 
-        if (sedeId) {
-          // Sumar al StockSede como unidad reciclada
-          await tx.stockSede.upsert({
-            where:  { sedeId_productoId: { sedeId, productoId: recojo.productoId } },
-            create: { sedeId, productoId: recojo.productoId, cantidad: 1 },
-            update: { cantidad: { increment: 1 } },
-          });
-
-          // Registrar en OnuReciclada para trazabilidad
-          await tx.onuReciclada.create({
-            data: {
-              recojoId:   recojo.id,
-              tipoEquipo: recojo.tipoEquipo || 'ONU',
-              codigoPon:  recojo.codigoPon  || null,
-              productoId: recojo.productoId,
-              sedeId,
-              estado:     'revision',
-              comentario: comentario || 'Aprobado por admin',
-              revisadoPor: String(req.usuario.id),
-            },
-          });
-        }
+      // Descontar del inventario del técnico (siempre: bueno o malogrado)
+      if (recojo.productoId && sedeId) {
+        await tx.asignacionTecnico.updateMany({
+          where: { tecnicoId: recojo.tecnicoId, productoId: recojo.productoId, sedeId },
+          data:  { cantidad: { decrement: 1 } },
+        });
       }
 
       // Actualizar estado del recojo
       await tx.recojo.update({
         where: { id: recojoId },
         data: {
-          estado:    resultado === 'bueno' ? 'entregado' : 'malogrado',
+          estado:     resultado === 'bueno' ? 'entregado' : 'malogrado',
           comentario: comentario || recojo.comentario,
         },
       });
