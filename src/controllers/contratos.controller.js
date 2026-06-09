@@ -229,6 +229,8 @@ const obtener = async (req, res, next) => {
       updatedAt:  contrato.updatedAt,
       mbps:       contrato.mbps    || null,       // ← AGREGAR
       planNombre: contrato.plan?.nombre || null,
+      precinto: contrato.precinto || null,  // ← AGREGAR
+
       equipoActual,
       ordenes,
     });
