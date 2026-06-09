@@ -274,7 +274,7 @@ const obtener = async (req, res, next) => {
         instalacion: { include: { configOnu: true, fotos: true } },
         sede:        { select: { id: true, nombre: true, ciudad: true } },
         contratoRef: { select: { numero: true, latitud: true, longitud: true, tipoServicio: true, precinto: true } },
-
+        plan:        { select: { nombre: true } },  // ← AGREGAR
       },
     });
     if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
@@ -374,10 +374,10 @@ const confirmarExcel = async (req, res, next) => {
         const asignar = tecnicoValidado && !TIPOS_SOLO_NOC.includes(o.tipoOrden);
 
         const ordenCreada = await prisma.$transaction(async (tx) => {
-          // 1. Upsert del contrato (crea o actualiza datos del cliente)
+          // 1. Upsert del contrato
           await upsertContratoDesdeOrden(tx, o, sedeId);
         
-          // 2. ¿El contrato ya tiene WAN? Si sí y hay técnico, la orden la hereda
+          // 2. ¿El contrato ya tiene WAN?
           const wanHeredada = await wanHeredableDelContrato(tx, o.contrato, o.tipoOrden, asignar);
         
           // 3. Estado inicial
@@ -385,7 +385,7 @@ const confirmarExcel = async (req, res, next) => {
             ? 'PENDIENTE_TECNICO'
             : (TIPOS_NOC.includes(o.tipoOrden) ? 'PENDIENTE_NOC' : 'PENDIENTE_TECNICO');
         
-          // ── NUEVO: resolver plan desde mensualidad ──────────────────
+          // ── Resolver plan desde mensualidad ──────────────────────────
           let planId = null;
           let mbps   = null;
         
@@ -395,14 +395,8 @@ const confirmarExcel = async (req, res, next) => {
         
             if (esInternet || esDuo) {
               const tipoServicio = esInternet ? 'INTERNET' : 'DUO';
-        
               const plan = await tx.planInternet.findFirst({
-                where: {
-                  sedeId,
-                  activo: true,
-                  precio:       { equals: o.mensualidad },
-                  tipoServicio,
-                },
+                where: { sedeId, activo: true, precio: { equals: o.mensualidad }, tipoServicio },
               });
               if (plan) {
                 planId = plan.id;
@@ -410,9 +404,18 @@ const confirmarExcel = async (req, res, next) => {
               }
             }
           }
-          // ────────────────────────────────────────────────────────────
         
-          // 4. Crear la orden enlazada al contrato
+          // ── Actualizar mbps en el contrato si se resolvió un plan ────
+          // El plan más reciente siempre gana (refleja el plan actual del cliente)
+          if (o.contrato && planId) {
+            await tx.contrato.update({
+              where: { numero: String(o.contrato).trim() },
+              data:  { mbps, planId },
+            });
+          }
+          // ─────────────────────────────────────────────────────────────
+        
+          // 4. Crear la orden
           return tx.ordenServicio.create({
             data: {
               nServicio:     String(o.nServicio),
@@ -428,11 +431,9 @@ const confirmarExcel = async (req, res, next) => {
               celular:       o.celular || '',
               observacion:   o.observacion,
               sedeId,
-              // ── NUEVO ────────────────────────────────────────────
               ...(o.mensualidad != null && { mensualidad: o.mensualidad }),
               ...(mbps   != null && { mbps }),
               ...(planId != null && { planId }),
-              // ─────────────────────────────────────────────────────
               ...(asignar && {
                 tecnicoId:       tecnicoValidado.id,
                 fechaAsignacion: new Date(),

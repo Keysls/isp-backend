@@ -75,6 +75,7 @@ const listar = async (req, res, next) => {
       where,
       include: {
         sede:    { select: { id: true, nombre: true } },
+         plan:    { select: { nombre: true, mbps: true } },
         ordenes: {
           where:   esSoloInternet ? { tipoOrden: { in: TIPOS_INTERNET } } : undefined,
           orderBy: { fechaServicio: 'desc' },
@@ -100,6 +101,8 @@ const listar = async (req, res, next) => {
         cantidadOrdenes: c.ordenes.length,
         ultimaActividad: ultima?.fechaServicio || null,
         ultimoTipoOrden: ultima?.tipoOrden     || null,
+        mbps:            c.mbps    || null,        // NUEVO
+         planNombre:      c.plan?.nombre || null,   // NUEVO
         createdAt:       c.createdAt,
       };
     });
@@ -140,6 +143,7 @@ const obtener = async (req, res, next) => {
       where: { numero: req.params.numero },
       include: {
         sede: { select: { id: true, nombre: true, ciudad: true } },
+        plan:    { select: { nombre: true, mbps: true } }, 
         ordenes: {
           where: esSoloInternet ? { tipoOrden: { in: TIPOS_INTERNET } } : undefined,
           orderBy: { fechaServicio: 'desc' },
@@ -223,6 +227,8 @@ const obtener = async (req, res, next) => {
       gateway:    contrato.gateway,
       createdAt:  contrato.createdAt,
       updatedAt:  contrato.updatedAt,
+      mbps:       contrato.mbps    || null,       // ← AGREGAR
+      planNombre: contrato.plan?.nombre || null,
       equipoActual,
       ordenes,
     });

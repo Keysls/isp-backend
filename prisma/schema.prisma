@@ -110,6 +110,9 @@ model Contrato {
   latitud      Float?
   longitud     Float?
   precinto     String?
+  mbps    Int?
+  planId  String?  @map("plan_id")
+  plan    PlanInternet? @relation(fields: [planId], references: [id])
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   sede         Sede            @relation(fields: [sedeId], references: [id])
@@ -631,21 +634,23 @@ model DevolucionDetalle {
 }
 
 model PlanInternet {
-  id        String         @id @default(dbgenerated("gen_random_uuid()::text"))
-  sedeId    String         @map("sede_id")
-  nombre    String         @db.VarChar(100)
-  mbps      Int
-  precio    Decimal        @db.Decimal(10, 2)
-  activo    Boolean        @default(true)
-  createdAt DateTime       @default(now()) @map("created_at")
-  updatedAt DateTime       @updatedAt @map("updated_at")
-  ordenes   OrdenServicio[]
-  sede      Sede           @relation(fields: [sedeId], references: [id])
-  tipoServicio  String  @default("INTERNET") @map("tipo_servicio") @db.VarChar(10)
+  id           String          @id @default(dbgenerated("gen_random_uuid()::text"))
+  sedeId       String          @map("sede_id")
+  nombre       String          @db.VarChar(100)
+  mbps         Int
+  precio       Decimal         @db.Decimal(10, 2)
+  tipoServicio String          @default("INTERNET") @map("tipo_servicio") @db.VarChar(10)
+  activo       Boolean         @default(true)
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  ordenes      OrdenServicio[]
+  contratos    Contrato[]
+  sede         Sede            @relation(fields: [sedeId], references: [id])
 
   @@index([sedeId])
   @@map("planes_internet")
 }
+
 
 
 enum Rol {
