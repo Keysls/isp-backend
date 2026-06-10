@@ -801,8 +801,13 @@ const inventarioTecnico = async (req, res, next) => {
       }),
       // ONUs asignadas
       prisma.onu.findMany({
-        where: { tecnicoId, sedeId },
-        include: { producto: { select: { nombre: true, codigo: true } } },
+        where: { tecnicoId, ...(sedeId && { sedeId }) },
+        select: {
+          id:         true,
+          codigoPon:  true,
+          productoId: true,
+          producto:   { select: { nombre: true, codigo: true } },
+        },
         orderBy: { createdAt: 'desc' },
       }),
       // ── NUEVO: Consumos (material gastado) ──────────────────
@@ -971,7 +976,12 @@ const miInventario = async (req, res, next) => {
       // ONUs asignadas
       prisma.onu.findMany({
         where: { tecnicoId, ...(sedeId && { sedeId }) },
-        include: { producto: { select: { nombre: true, codigo: true } } },
+        select: {
+          id:         true,
+          codigoPon:  true,
+          productoId: true,
+          producto:   { select: { nombre: true, codigo: true } },
+        },
         orderBy: { createdAt: 'desc' },
       }),
       // Historial de entregas recibidas del admin
@@ -1075,10 +1085,11 @@ const miInventario = async (req, res, next) => {
       },
       items,
       onus: onus.map(o => ({
-        id:        o.id,
-        codigoPon: o.codigoPon,
-        producto:  o.producto.nombre,
-        codigo:    o.producto.codigo,
+        id:         o.id,
+        codigoPon:  o.codigoPon,
+        producto:   o.producto?.nombre ?? '',
+        codigo:     o.producto?.codigo ?? null,
+        productoId: o.productoId,
       })),
       historialConsumos: consumosEnriquecidos,
       historialEntregas: entregas.map(e => ({
