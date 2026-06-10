@@ -99,6 +99,8 @@ CREATE TABLE "contratos" (
     "precinto" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "mbps" INTEGER,
+    "plan_id" TEXT,
 
     CONSTRAINT "contratos_pkey" PRIMARY KEY ("numero")
 );
@@ -443,6 +445,7 @@ CREATE TABLE "entregas_tecnicos" (
     "fecha" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "registrado_por" TEXT,
     "sede_id" TEXT,
+    "codigo_pon" TEXT,
 
     CONSTRAINT "entregas_tecnicos_pkey" PRIMARY KEY ("id")
 );
@@ -567,7 +570,7 @@ CREATE TABLE "devolucion_detalles" (
 
 -- CreateTable
 CREATE TABLE "planes_internet" (
-    "id" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+    "id" TEXT NOT NULL DEFAULT (gen_random_uuid())::text,
     "sede_id" TEXT NOT NULL,
     "nombre" VARCHAR(100) NOT NULL,
     "mbps" INTEGER NOT NULL,
@@ -575,6 +578,7 @@ CREATE TABLE "planes_internet" (
     "activo" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
+    "tipo_servicio" VARCHAR(10) NOT NULL DEFAULT 'INTERNET',
 
     CONSTRAINT "planes_internet_pkey" PRIMARY KEY ("id")
 );
@@ -660,6 +664,9 @@ CREATE UNIQUE INDEX "recojos_codigo_key" ON "recojos"("codigo");
 -- CreateIndex
 CREATE INDEX "planes_internet_sede_id_idx" ON "planes_internet"("sede_id");
 
+-- CreateIndex
+CREATE INDEX "idx_planes_internet_sede" ON "planes_internet"("sede_id");
+
 -- AddForeignKey
 ALTER TABLE "usuarios" ADD CONSTRAINT "usuarios_sedeId_fkey" FOREIGN KEY ("sedeId") REFERENCES "sedes"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
@@ -673,13 +680,16 @@ ALTER TABLE "tecnicos" ADD CONSTRAINT "tecnicos_usuarioId_fkey" FOREIGN KEY ("us
 ALTER TABLE "tokens_sesion" ADD CONSTRAINT "tokens_sesion_usuarioId_fkey" FOREIGN KEY ("usuarioId") REFERENCES "usuarios"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "contratos" ADD CONSTRAINT "contratos_plan_id_fkey" FOREIGN KEY ("plan_id") REFERENCES "planes_internet"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "contratos" ADD CONSTRAINT "contratos_sedeId_fkey" FOREIGN KEY ("sedeId") REFERENCES "sedes"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ordenes_servicio" ADD CONSTRAINT "ordenes_servicio_plan_id_fkey" FOREIGN KEY ("plan_id") REFERENCES "planes_internet"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ordenes_servicio" ADD CONSTRAINT "ordenes_servicio_contrato_fkey" FOREIGN KEY ("contrato") REFERENCES "contratos"("numero") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ordenes_servicio" ADD CONSTRAINT "ordenes_servicio_contrato_fkey" FOREIGN KEY ("contrato") REFERENCES "contratos"("numero") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ordenes_servicio" ADD CONSTRAINT "ordenes_servicio_plan_id_fkey" FOREIGN KEY ("plan_id") REFERENCES "planes_internet"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ordenes_servicio" ADD CONSTRAINT "ordenes_servicio_sedeId_fkey" FOREIGN KEY ("sedeId") REFERENCES "sedes"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -793,10 +803,10 @@ ALTER TABLE "salidas_directas" ADD CONSTRAINT "salidas_directas_sede_id_fkey" FO
 ALTER TABLE "activos" ADD CONSTRAINT "activos_sede_id_fkey" FOREIGN KEY ("sede_id") REFERENCES "sedes"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "devoluciones_tecnico" ADD CONSTRAINT "devoluciones_tecnico_tecnico_id_fkey" FOREIGN KEY ("tecnico_id") REFERENCES "tecnicos"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "devoluciones_tecnico" ADD CONSTRAINT "devoluciones_tecnico_sede_id_fkey" FOREIGN KEY ("sede_id") REFERENCES "sedes"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "devoluciones_tecnico" ADD CONSTRAINT "devoluciones_tecnico_sede_id_fkey" FOREIGN KEY ("sede_id") REFERENCES "sedes"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "devoluciones_tecnico" ADD CONSTRAINT "devoluciones_tecnico_tecnico_id_fkey" FOREIGN KEY ("tecnico_id") REFERENCES "tecnicos"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "devolucion_detalles" ADD CONSTRAINT "devolucion_detalles_devolucion_id_fkey" FOREIGN KEY ("devolucion_id") REFERENCES "devoluciones_tecnico"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

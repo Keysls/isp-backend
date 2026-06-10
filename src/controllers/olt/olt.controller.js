@@ -184,7 +184,10 @@ const eliminar = async (req, res, next) => {
 // ── POST /api/olt/:id/test ────────────────────────────────────
 const test = async (req, res, next) => {
   try {
-    const olt = await prisma.olt.findUnique({ where: { id: req.params.id } });
+    const olt = await prisma.olt.findUnique({
+      where:   { id: req.params.id },
+      include: { modelo: true },
+    });
     if (!olt) return res.status(404).json({ error: 'OLT no encontrada' });
 
     const oltConPassword = { ...olt, password: decrypt(olt.passwordHash) };

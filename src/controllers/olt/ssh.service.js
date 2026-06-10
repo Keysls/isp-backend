@@ -95,7 +95,6 @@ const runTelnet = (host, port, usuario, password, comandos, timeoutMs = 60000) =
     let   step    = 0;
     const cmdList = ['terminal length 0', ...comandos, 'exit'];
     let   cmdIdx  = 0;
-    let   waitingForPrompt = false;
     let   timer;
 
     const resetTimer = () => {
@@ -114,42 +113,38 @@ const runTelnet = (host, port, usuario, password, comandos, timeoutMs = 60000) =
     socket.connect(port || 23, host, () => { resetTimer(); });
 
     socket.on('data', (data) => {
-      const txt = data.toString();
-      output += txt;
+      const txt   = data.toString();
+      output     += txt;
       resetTimer();
+
+      // Detectar bytes IAC (negociación Telnet nativa — 0xFF)
+      const isIac = data[0] === 0xff;
 
       if (step === 0) {
         if (txt.toLowerCase().includes('username') || txt.toLowerCase().includes('login')) {
           sendCmd(usuario);
           step = 1;
-        } else if (txt.length > 0) {
-          // Banner o negociación IAC — enviar Enter para estimular el prompt
-          socket.write('\r\n');
+        } else if (!isIac && txt.trim().length > 0) {
+          // Estimular prompt solo si no es paquete IAC puro
+          sendCmd('');
         }
       } else if (step === 1) {
         if (txt.toLowerCase().includes('password')) {
           sendCmd(password);
           step = 2;
         }
-      } else if (step === 2) {
-        if (!waitingForPrompt && (txt.includes('#') || txt.includes('>'))) {
-          if (cmdIdx < cmdList.length) {
-            waitingForPrompt = true;
-            const cmd = cmdList[cmdIdx++];
-            sendCmd(cmd);
-            const ecoCheck = setInterval(() => {
-              if (output.includes(cmd)) {
-                waitingForPrompt = false;
-                clearInterval(ecoCheck);
-              }
-            }, 100);
-          } else {
-            clearTimeout(timer);
-            socket.destroy();
-            resolve(output);
+      }  else if (step === 2) {
+          if (txt.includes('#') || txt.includes('>')) {
+            if (cmdIdx < cmdList.length) {
+              const cmd = cmdList[cmdIdx++];
+              setTimeout(() => sendCmd(cmd), 800); // ✅ delay anti-chunk
+            } else {
+              clearTimeout(timer);
+              socket.destroy();
+              resolve(output);
+            }
           }
         }
-      }
     });
 
     socket.on('error', (err) => { clearTimeout(timer); reject(err); });
@@ -211,6 +206,10 @@ const testPuerto = (host, port, label, timeoutMs = 5000) => {
 };
 
 const testConexionOlt = async (olt) => {
+
+  const esC600 = ['C600','C610','C620'].includes((olt.modelo?.nombre || '').toUpperCase());
+  const cmdTest = esC600 ? 'show software' : 'show system-group';
+
   const [sshTcp, telnetTcp] = await Promise.all([
     testPuerto(olt.direccionIp, olt.puertoSsh,    'SSH'),
     testPuerto(olt.direccionIp, olt.puertoTelnet, 'Telnet'),
@@ -221,8 +220,7 @@ const testConexionOlt = async (olt) => {
   if (sshTcp.success) {
     const t0 = Date.now();
     try {
-      await runSsh(olt.direccionIp, olt.puertoSsh, olt.usuario, olt.password, ['show version'], 10000);
-      sshAuth = { success: true,  protocol: 'SSH Auth', message: 'Autenticación exitosa', latency: Date.now() - t0 };
+      await runSsh(olt.direccionIp, olt.puertoSsh, olt.usuario, olt.password, [cmdTest], 10000);      sshAuth = { success: true,  protocol: 'SSH Auth', message: 'Autenticación exitosa', latency: Date.now() - t0 };
     } catch (err) {
       sshAuth = { success: false, protocol: 'SSH Auth', message: err.message, latency: Date.now() - t0 };
     }
@@ -233,8 +231,8 @@ const testConexionOlt = async (olt) => {
   if (telnetTcp.success) {
     const t0 = Date.now();
     try {
-      await runTelnet(olt.direccionIp, olt.puertoTelnet, olt.usuario, olt.password, ['show version'], 20000);
-      telnetAuth = { success: true,  protocol: 'Telnet Auth', message: 'Autenticación exitosa', latency: Date.now() - t0 };
+      await runTelnet(olt.direccionIp, olt.puertoTelnet, olt.usuario, olt.password, [cmdTest], 45000);
+      telnetAuth = { success: true, protocol: 'Telnet Auth', message: 'Autenticación exitosa', latency: Date.now() - t0 }; // ✅ línea que faltaba
     } catch (err) {
       telnetAuth = { success: false, protocol: 'Telnet Auth', message: err.message, latency: Date.now() - t0 };
     }
