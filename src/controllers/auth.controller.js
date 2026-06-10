@@ -14,8 +14,7 @@ const login = async (req, res, next) => {
 
     const usuario = await prisma.usuario.findUnique({
       where:   { email: email.toLowerCase().trim() },
-      include: { tecnico: true, sede: { select: { id: true, nombre: true, ciudad: true, puedeEnviarStock: true } } },
-    });
+      include: { tecnico: true, sede: { select: { id: true, nombre: true, ciudad: true, puedeEnviarStock: true, esPrincipal: true } } },    });
 
     if (!usuario || !usuario.activo) {
       return res.status(401).json({ error: 'Credenciales incorrectas' });
@@ -98,7 +97,7 @@ const me = async (req, res, next) => {
       where:   { id: req.usuario.id },
       include: {
         tecnico: true,
-        sede: { select: { id: true, nombre: true, ciudad: true, puedeEnviarStock: true } },
+        sede: { select: { id: true, nombre: true, ciudad: true, puedeEnviarStock: true, esPrincipal: true } },
       },
     });
 

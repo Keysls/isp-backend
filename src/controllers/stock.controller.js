@@ -332,8 +332,9 @@ const enviarProductosSede = async (req, res, next) => {
     const guia = String(req.body.guia || '').trim();
     const comentario = req.body.comentario || null;
     const items = Array.isArray(req.body.items) ? req.body.items : [];
+    const onuIds = uniqueNumericIds(req.body.onu_ids || req.body.onuIds || []);
 
-    if (!sedeOrigenId || !sedeDestinoId || !guia || items.length === 0) {
+    if (!sedeOrigenId || !sedeDestinoId || !guia || (items.length === 0 && onuIds.length === 0)) {
       return res.status(400).json({ error: 'Faltan campos obligatorios' });
     }
     if (sedeOrigenId === sedeDestinoId) {
@@ -356,6 +357,7 @@ const enviarProductosSede = async (req, res, next) => {
         },
       });
 
+      // ── Items normales por cantidad ──
       const normalized = new Map();
       for (const item of items) {
         const productoId = Number(item.producto_id ?? item.productoId);
@@ -363,23 +365,49 @@ const enviarProductosSede = async (req, res, next) => {
         if (!productoId || cantidad <= 0) throw new Error('Producto o cantidad invalidos');
         normalized.set(productoId, (normalized.get(productoId) || 0) + cantidad);
       }
-
       for (const [productoId, cantidad] of normalized.entries()) {
         await decrementStockSede(tx, { sedeId: sedeOrigenId, productoId, cantidad });
         await tx.envioDetalle.create({
           data: { envioId: envio.id, productoId, cantidad },
         });
       }
+
+      // ── ONUs específicas por código PON ──
+      for (const onuId of onuIds) {
+        const onu = await tx.onu.findFirst({
+          where: { id: Number(onuId), sedeId: sedeOrigenId, tecnicoId: null, salidaDirecta: false },
+        });
+        if (!onu) throw new Error(`ONU ID ${onuId} no disponible`);
+
+        // Mover la ONU a la sede destino (pendiente de recepción)
+        await tx.onu.update({
+          where: { id: onu.id },
+          data: { sedeId: sedeDestinoId },
+        });
+
+        // Decrementar stock en sede origen
+        await decrementStockSede(tx, { sedeId: sedeOrigenId, productoId: onu.productoId, cantidad: 1 });
+
+        // Registrar en el detalle del envío
+        await tx.envioDetalle.create({
+          data: { envioId: envio.id, productoId: onu.productoId, cantidad: 1 },
+        });
+      }
     });
 
-    // Notificar a la sede destino
+    // Notificación (igual que antes)
     try {
+      const todosItems = [
+        ...items.map(i => ({ productoId: Number(i.producto_id ?? i.productoId), cantidad: toInt(i.cantidad) })),
+      ];
+      if (onuIds.length > 0) {
+        const onus = await prisma.onu.findMany({ where: { id: { in: onuIds.map(Number) } }, select: { productoId: true } });
+        onus.forEach(o => todosItems.push({ productoId: o.productoId, cantidad: 1 }));
+      }
       const detallesParaNotif = [];
-      for (const [productoId, cantidad] of new Map(
-        items.map(i => [Number(i.producto_id ?? i.productoId), 0])
-      ).entries()) {
+      for (const { productoId, cantidad } of todosItems) {
         const prod = await prisma.producto.findUnique({ where: { id: productoId }, select: { nombre: true } });
-        if (prod) detallesParaNotif.push({ producto: prod.nombre, cantidad: items.find(i => Number(i.producto_id ?? i.productoId) === productoId)?.cantidad || 0 });
+        if (prod) detallesParaNotif.push({ producto: prod.nombre, cantidad });
       }
       const sedeOrigen = await prisma.sede.findUnique({ where: { id: sedeOrigenId }, select: { nombre: true } });
       const envioCreado = await prisma.envio.findFirst({
