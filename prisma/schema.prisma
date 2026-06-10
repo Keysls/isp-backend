@@ -20,20 +20,20 @@ model Sede {
   activos            Activo[]
   asignaciones       AsignacionTecnico[]
   contratos          Contrato[]
+  devoluciones       DevolucionTecnico[]
   envios             Envio[]             @relation("EnvioDestino")
   enviosOrigen       Envio[]             @relation("EnvioOrigen")
   olts               Olt[]
   onusList           Onu[]
   onusRecicladas     OnuReciclada[]
   ordenes            OrdenServicio[]
+  planes             PlanInternet[]
   puntosRed          PuntoRed[]
   salidasDirectas    SalidaDirecta[]
   stockSedes         StockSede[]
   stockSedeVariantes StockSedeVariante[]
   tecnicos           Tecnico[]
   usuarios           Usuario[]
-  devoluciones  DevolucionTecnico[]
-  planes        PlanInternet[]
 
   @@map("sedes")
 }
@@ -69,10 +69,10 @@ model Tecnico {
   sedeId        String?             @db.VarChar(36)
   asignaciones  AsignacionTecnico[]
   consumos      ConsumoTecnico[]
+  devoluciones  DevolucionTecnico[]
   entregas      EntregaTecnico[]
   onusAsignadas Onu[]
   ordenes       OrdenServicio[]
-  devoluciones  DevolucionTecnico[]
   sede          Sede?               @relation(fields: [sedeId], references: [id])
   usuario       Usuario             @relation(fields: [usuarioId], references: [id])
 
@@ -110,11 +110,11 @@ model Contrato {
   latitud      Float?
   longitud     Float?
   precinto     String?
-  mbps    Int?
-  planId  String?  @map("plan_id")
-  plan    PlanInternet? @relation(fields: [planId], references: [id])
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
+  mbps         Int?
+  planId       String?         @map("plan_id")
+  plan    PlanInternet? @relation(fields: [planId], references: [id]) 
   sede         Sede            @relation(fields: [sedeId], references: [id])
   ordenes      OrdenServicio[]
 
@@ -124,10 +124,10 @@ model Contrato {
 }
 
 model OrdenServicio {
-  id                String       @id @default(uuid())
-  nServicio         String       @unique
+  id                String        @id @default(uuid())
+  nServicio         String        @unique
   tipoOrden         TipoOrden
-  estado            EstadoOrden  @default(PENDIENTE_NOC)
+  estado            EstadoOrden   @default(PENDIENTE_NOC)
   fechaServicio     DateTime
   contrato          String?
   pdfOriginalUrl    String?
@@ -150,16 +150,16 @@ model OrdenServicio {
   fechaInicio       DateTime?
   fechaFin          DateTime?
   tiempoInstalacion Int?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  mensualidad       Decimal?      @db.Decimal(10, 2)
+  mbps              Int?
+  planId            String?       @map("plan_id")
   instalacion       Instalacion?
-  mensualidad   Decimal?  @db.Decimal(10, 2)
-  mbps          Int?
-  planId        String?   @map("plan_id")
-  plan          PlanInternet? @relation(fields: [planId], references: [id])
-  contratoRef       Contrato?    @relation(fields: [contrato], references: [numero])
-  sede              Sede?        @relation(fields: [sedeId], references: [id])
-  tecnico           Tecnico?     @relation(fields: [tecnicoId], references: [id])
+  contratoRef       Contrato?     @relation(fields: [contrato], references: [numero])
+  plan              PlanInternet? @relation(fields: [planId], references: [id])
+  sede              Sede?         @relation(fields: [sedeId], references: [id])
+  tecnico           Tecnico?      @relation(fields: [tecnicoId], references: [id])
 
   @@index([contrato])
   @@map("ordenes_servicio")
@@ -352,30 +352,30 @@ model Notificacion {
 }
 
 model Producto {
-  id                Int                 @id @default(autoincrement())
-  nombre            String
-  descripcion       String?
-  stockTotal        Int                 @default(0) @map("stock_total")
-  estado            Boolean             @default(true)
-  createdAt         DateTime?           @default(now()) @map("created_at")
-  codigo            String?
-  categoria         String?
-  unidad            String?
-  stockMinimo       Int                 @default(0) @map("stock_minimo")
-  esMedible         Boolean             @default(false) @map("es_medible")
-  metrosPorUnidad   Int?                @map("metros_por_unidad")
-  metrosDisponibles Int?                @map("metros_disponibles")
-  tieneVariantes    Boolean             @default(false) @map("tiene_variantes")
-  asignaciones      AsignacionTecnico[]
-  consumos          ConsumoTecnico[]
-  entradasStock     EntradaStock[]
-  entregas          EntregaTecnico[]
-  envioDetalles     EnvioDetalle[]
-  onusList          Onu[]
-  variantes         ProductoVariante[]
-  salidasDirectas   SalidaDirecta[]
-  stockSedes        StockSede[]
+  id                 Int                 @id @default(autoincrement())
+  nombre             String
+  descripcion        String?
+  stockTotal         Int                 @default(0) @map("stock_total")
+  estado             Boolean             @default(true)
+  createdAt          DateTime?           @default(now()) @map("created_at")
+  codigo             String?
+  categoria          String?
+  unidad             String?
+  stockMinimo        Int                 @default(0) @map("stock_minimo")
+  esMedible          Boolean             @default(false) @map("es_medible")
+  metrosPorUnidad    Int?                @map("metros_por_unidad")
+  metrosDisponibles  Int?                @map("metros_disponibles")
+  tieneVariantes     Boolean             @default(false) @map("tiene_variantes")
+  asignaciones       AsignacionTecnico[]
+  consumos           ConsumoTecnico[]
   devolucionDetalles DevolucionDetalle[]
+  entradasStock      EntradaStock[]
+  entregas           EntregaTecnico[]
+  envioDetalles      EnvioDetalle[]
+  onusList           Onu[]
+  variantes          ProductoVariante[]
+  salidasDirectas    SalidaDirecta[]
+  stockSedes         StockSede[]
 
   @@map("productos")
 }
@@ -504,6 +504,7 @@ model EntregaTecnico {
   fecha         DateTime @default(now())
   registradoPor String?  @map("registrado_por")
   sedeId        String?  @map("sede_id")
+  codigoPon     String?  @map("codigo_pon")
   producto      Producto @relation(fields: [productoId], references: [id])
   tecnico       Tecnico  @relation(fields: [tecnicoId], references: [id])
 
@@ -605,6 +606,7 @@ model LogActividad {
 
   @@map("log_actividad")
 }
+
 model DevolucionTecnico {
   id            Int                 @id @default(autoincrement())
   tecnicoId     String              @map("tecnico_id")
@@ -616,8 +618,8 @@ model DevolucionTecnico {
   fechaRevision DateTime?           @map("fecha_revision")
   createdAt     DateTime            @default(now()) @map("created_at")
   detalles      DevolucionDetalle[]
-  tecnico       Tecnico             @relation(fields: [tecnicoId], references: [id])
   sede          Sede                @relation(fields: [sedeId], references: [id])
+  tecnico       Tecnico             @relation(fields: [tecnicoId], references: [id])
 
   @@map("devoluciones_tecnico")
 }
@@ -634,24 +636,23 @@ model DevolucionDetalle {
 }
 
 model PlanInternet {
-  id           String          @id @default(dbgenerated("gen_random_uuid()::text"))
+  id           String          @id @default(dbgenerated("(gen_random_uuid())::text"))
   sedeId       String          @map("sede_id")
   nombre       String          @db.VarChar(100)
   mbps         Int
   precio       Decimal         @db.Decimal(10, 2)
-  tipoServicio String          @default("INTERNET") @map("tipo_servicio") @db.VarChar(10)
   activo       Boolean         @default(true)
   createdAt    DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
+  tipoServicio String          @default("INTERNET") @map("tipo_servicio") @db.VarChar(10)
   ordenes      OrdenServicio[]
-  contratos    Contrato[]
+  contratos Contrato[] 
   sede         Sede            @relation(fields: [sedeId], references: [id])
 
   @@index([sedeId])
+  @@index([sedeId], map: "idx_planes_internet_sede")
   @@map("planes_internet")
 }
-
-
 
 enum Rol {
   SUPERADMIN

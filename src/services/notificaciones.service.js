@@ -69,7 +69,7 @@ const notificarOnuErrorOlt = async (configOnu, orden) => {
         titulo:      `ONU #${orden?.nServicio || '?'}${sedeNombre ? ' - ' + sedeNombre : ''}`,
         detalle:     orden?.abonado || 'Sin nombre',
         link:        '/onus-pendientes',
-        sedeId:      orden?.sedeId || null,
+        sedeId:      null,
         ordenId:     orden?.id || null,
         configOnuId: configOnu.id,
       },

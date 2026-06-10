@@ -139,7 +139,7 @@ const asignarItems = async (tx, { sedeId, tecnicoId, registradoPor, items = [] }
     if (!productoId || cantidad <= 0) throw new Error('Producto o cantidad invalidos');
 
     await tx.entregaTecnico.create({
-      data: { productoId, tecnicoId, sedeId, cantidad, registradoPor: String(registradoPor) },
+      data: { productoId, tecnicoId, sedeId, cantidad, registradoPor: String(registradoPor), codigoPon: item.codigoPon || null },
     });
 
     await decrementStockSede(tx, { sedeId, productoId, cantidad });
@@ -231,11 +231,11 @@ const asignarCompleto = async (req, res, next) => {
 
         await tx.onu.update({ where: { id: onu.id }, data: { tecnicoId } });
         await asignarItems(tx, {
-          sedeId,
-          tecnicoId,
-          registradoPor: req.usuario.id,
-          items: [{ producto_id: onu.productoId, cantidad: 1 }],
-        });
+        sedeId,
+        tecnicoId,
+        registradoPor: req.usuario.id,
+        items: [{ producto_id: onu.productoId, cantidad: 1, codigoPon: onu.codigoPon }],
+      });
       }
     });
 
@@ -544,6 +544,7 @@ const statsControlador = async (req, res, next) => {
         include: { producto: true },
       }),
       prisma.entregaTecnico.findMany({
+
         where: {
           tecnicoId: {
             in: await prisma.tecnico.findMany({
@@ -613,11 +614,13 @@ const auditoriaControlador = async (req, res, next) => {
 
     const [entregas, consumos, salidas, entradas, envios] = await Promise.all([
       prisma.entregaTecnico.findMany({
-          where: {
-            ...(sedeId && { tecnico: { usuario: { sedeId } } }),
-          },
+        where: {
+          ...(sedeId && { tecnico: { usuario: { sedeId } } }),
+        },
         select: {
           id: true, fecha: true, cantidad: true, tecnicoId: true,
+          productoId: true,
+          codigoPon: true, 
           producto: { select: { nombre: true } },
           tecnico: { select: { usuario: { select: { nombre: true, apellido: true } } } },
         },
@@ -673,11 +676,18 @@ const auditoriaControlador = async (req, res, next) => {
       }),
     ]);
 
+    // REEMPLAZA el bloque onusAsignadas y el map con:
     const rows = [
       ...entregas.map(e => ({
-        id: e.id, fecha: e.fecha, tipo: 'salida', item: e.producto.nombre, cantidad: e.cantidad,
+        id: e.id, fecha: e.fecha, tipo: 'salida',
+        item: e.codigoPon
+          ? `${e.producto.nombre} — ${e.codigoPon}`
+          : e.producto.nombre,
+        cantidad: e.cantidad,
         tecnico_id:     e.tecnicoId,
-        tecnico_nombre: e.tecnico?.usuario ? `${e.tecnico.usuario.nombre} ${e.tecnico.usuario.apellido}`.trim() : null,
+        tecnico_nombre: e.tecnico?.usuario
+          ? `${e.tecnico.usuario.nombre} ${e.tecnico.usuario.apellido}`.trim()
+          : null,
       })),
       
       ...(await Promise.all(consumos.map(async c => {
