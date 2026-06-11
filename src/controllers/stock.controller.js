@@ -1203,20 +1203,42 @@ const registrarConsumo = async (req, res, next) => {
  
     // ── Marcar recojos como "usado" si el producto consumido era un recojo en_mano ──
     // Si el técnico usó un producto que tenía como recojo, ese recojo ya no está disponible
-    const productosConsumidos = itemsNormalizados.map(i => i.productoId);
-    if (productosConsumidos.length > 0) {
-      await prisma.recojo.updateMany({
+    // ── Marcar recojos como consumidos y descontar de asignacionTecnico ──
+const productosConsumidos = itemsNormalizados.map(i => i.productoId);
+if (productosConsumidos.length > 0) {
+  // Buscar recojos en_mano de estos productos
+  const recojosAfectados = await prisma.recojo.findMany({
+    where: {
+      tecnicoId:  tecnico.id,
+      estado:     'en_mano',
+      productoId: { in: productosConsumidos },
+    },
+    select: { id: true, productoId: true },
+  });
+
+  if (recojosAfectados.length > 0) {
+    // Marcar como entregado (estado válido en el schema)
+    await prisma.recojo.updateMany({
+      where: { id: { in: recojosAfectados.map(r => r.id) } },
+      data: {
+        estado:     'entregado',
+        comentario: ordenId ? `Usado en orden: ${ordenId}` : 'Usado en servicio',
+      },
+    });
+
+    // Descontar de asignacionTecnico por cada recojo consumido
+    for (const recojo of recojosAfectados) {
+      await prisma.asignacionTecnico.updateMany({
         where: {
           tecnicoId:  tecnico.id,
-          estado:     'en_mano',
-          productoId: { in: productosConsumidos },
+          productoId: recojo.productoId,
+          sedeId:     tecnico.sedeId,
         },
-        data: {
-          estado:    'usado',
-          comentario: ordenId ? `Usado en orden: ${ordenId}` : 'Usado en servicio',
-        },
+        data: { cantidad: { decrement: 1 } },
       });
     }
+  }
+}
 
     // ── Desvincular ONUs instaladas en cliente ─────────────────
     const itemsConPon = items.filter(i => i.codigoPon);
