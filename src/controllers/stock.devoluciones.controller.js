@@ -101,18 +101,36 @@ const registrarDevolucion = async (req, res, next) => {
   }
 
     // Marcar ONUs como pendientes de devolución
-    if (onuIds.length > 0) {
-      await tx.onu.updateMany({
-        where: {
-          id:        { in: onuIds.map(Number) },
-          tecnicoId: tecnico.id,
-        },
-        data: {
-          tecnicoId: null,
-          cliente:   `devolucion_pendiente#${dev.id}`,
-        },
-      });
-    }
+    // Marcar ONUs como pendientes de devolución
+      if (onuIds.length > 0) {
+        const onusADevolver = await tx.onu.findMany({
+          where: { id: { in: onuIds.map(Number) }, tecnicoId: tecnico.id },
+          include: { producto: { select: { nombre: true } } },
+        });
+
+        await tx.onu.updateMany({
+          where: { id: { in: onuIds.map(Number) }, tecnicoId: tecnico.id },
+          data:  { tecnicoId: null, cliente: `devolucion_pendiente#${dev.id}` },
+        });
+
+        // Guardar detalle de ONUs en devolucion_detalles con cantidad 0
+        // usando el campo comentario del recojo para guardar codigoPon
+        // Alternativa: crear recojos asociados a la devolución
+        for (const onu of onusADevolver) {
+          await tx.recojo.create({
+            data: {
+              tecnicoId:     tecnico.id,
+              productoId:    onu.productoId,
+              tipoEquipo:    'ONU',
+              codigoPon:     onu.codigoPon,
+              estado:        'en_revision',
+              grupoOrden:    null,
+              registradoPor: String(usuarioId),
+              comentario:    `Devuelto en devolución #${dev.id}`,
+            },
+          });
+        }
+      }
 
     return dev;
     });
@@ -170,65 +188,45 @@ const misDevoluciones = async (req, res, next) => {
       : [];
     const nombresProductos = Object.fromEntries(productos.map(p => [p.id, p.nombre]));
 
-    // Obtener contrato y abonado desde la orden asociada al recojo
-    const grupoOrdenIds = [...new Set(recojosRevision.map(r => r.grupoOrden).filter(Boolean))];
-    const ordenes = grupoOrdenIds.length > 0
-      ? await prisma.ordenServicio.findMany({
-          where:  { id: { in: grupoOrdenIds } },
-          select: { id: true, contrato: true, abonado: true },
-        })
-      : [];
-    const datosOrden = Object.fromEntries(ordenes.map(o => [o.id, { contrato: o.contrato, abonado: o.abonado }]));
-    
-    // ONUs devueltas pendientes de aprobación — UNA sola query para todas
-        const todasOnusPendientes = await prisma.onu.findMany({
-          where: {
-            cliente: { startsWith: 'devolucion_pendiente#' },
-          },
-          include: { producto: { select: { nombre: true } } },
-        });
+        // Obtener contrato y abonado desde la orden asociada al recojo
+        const grupoOrdenIds = [...new Set(recojosRevision.map(r => r.grupoOrden).filter(Boolean))];
+        const ordenes = grupoOrdenIds.length > 0
+          ? await prisma.ordenServicio.findMany({
+              where:  { id: { in: grupoOrdenIds } },
+              select: { id: true, contrato: true, abonado: true },
+            })
+          : [];
+        const datosOrden = Object.fromEntries(ordenes.map(o => [o.id, { contrato: o.contrato, abonado: o.abonado }]));
+        
+        // ONUs devueltas pendientes de aprobación — UNA sola query para todas
+            
 
-        res.json(devoluciones.map(d => {
-          const recojosAsociados = recojosRevision.filter(
-            r => r.comentario === `Devuelto en devolución #${d.id}`
-          );
-          const onusAsociadas = todasOnusPendientes.filter(
-            o => o.cliente === `devolucion_pendiente#${d.id}`
-          );
-          return {
-            id:            d.id,
-            estado:        d.estado,
-
-          comentario:    d.comentario,
-          fecha:         d.createdAt,
-          fechaRevision: d.fechaRevision,
-          onus: onusDevueltas.map(o => ({
-            id:        o.id,
-            codigoPon: o.codigoPon,
-            producto:  o.producto?.nombre || null,
-          })),
+          res.json(devoluciones.map(d => {
+      const recojosAsociados = recojosRevision.filter(
+        r => r.comentario === `Devuelto en devolución #${d.id}`
+      );
+      return {
+        id:            d.id,
+        estado:        d.estado,
+        comentario:    d.comentario,
+        fecha:         d.createdAt,
+        fechaRevision: d.fechaRevision,
         detalles: d.detalles.map(det => ({
           productoId: det.productoId,
           nombre:     det.producto.nombre,
           unidad:     det.producto.unidad,
           cantidad:   Number(det.cantidad),
         })),
-
-        onus: onusAsociadas.map(o => ({
-          id:        o.id,
-          codigoPon: o.codigoPon,
-          producto:  o.producto?.nombre || null,
-        })),
-
-        recojos: recojosAsociados.map(r => ({
-          id:             r.id,
-          tipoEquipo:     r.tipoEquipo,
-          codigoPon:      r.codigoPon,
-          estado:         r.estado,
-          nombreProducto: r.productoId ? (nombresProductos[r.productoId] || null) : null,
-          contrato:       r.grupoOrden ? (datosOrden[r.grupoOrden]?.contrato || null) : null,
-          abonado:        r.grupoOrden ? (datosOrden[r.grupoOrden]?.abonado  || null) : null,
-        })),
+              recojos: recojosAsociados.map(r => ({
+                id:             r.id,
+                tipoEquipo:     r.tipoEquipo,
+                codigoPon:      r.codigoPon,
+                estado:         r.estado,
+                grupoOrden:     r.grupoOrden || null,
+                nombreProducto: r.productoId ? (nombresProductos[r.productoId] || null) : null,
+                contrato:       r.grupoOrden ? (datosOrden[r.grupoOrden]?.contrato || null) : null,
+                abonado:        r.grupoOrden ? (datosOrden[r.grupoOrden]?.abonado  || null) : null,
+              })),
               };
             }));
           } catch (err) { next(err); }
@@ -259,14 +257,7 @@ const listarDevoluciones = async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    // ONUs devueltas pendientes asociadas a estas devoluciones
-      const todasOnusAdmin = await prisma.onu.findMany({
-        where: {
-          cliente: { startsWith: 'devolucion_pendiente#' },
-        },
-        include: { producto: { select: { nombre: true } } },
-      });
-
+  
     // Enriquecer con recojos en_revision asociados
     // Traer todos los recojos de todas las devoluciones en UNA sola query
       const todosLosIds = devoluciones.map(d => d.id);
@@ -301,9 +292,6 @@ const listarDevoluciones = async (req, res, next) => {
         const recojosAsociados = todosRecojos.filter(
           r => r.comentario === `Devuelto en devolución #${d.id}`
         );
-        const onusAsociadasAdmin = todasOnusAdmin.filter(
-          o => o.cliente === `devolucion_pendiente#${d.id}`
-        );
         return {
           id:            d.id,
 
@@ -324,20 +312,17 @@ const listarDevoluciones = async (req, res, next) => {
             cantidad:   Number(det.cantidad),
           })),
 
-          onus: onusAsociadasAdmin.map(o => ({
-            id:        o.id,
-            codigoPon: o.codigoPon,
-            producto:  o.producto?.nombre || null,
-          })),
+         
 
           recojos: recojosAsociados.map(r => ({
             id:             r.id,
             tipoEquipo:     r.tipoEquipo,
             codigoPon:      r.codigoPon,
             estado:         r.estado,
+            grupoOrden:     r.grupoOrden || null,
             nombreProducto: r.productoId ? (nombresAll[r.productoId] || null) : null,
-            contrato:       r.grupoOrden ? (datosOrdenAll[r.grupoOrden]?.contrato || null) : null,
-            abonado:        r.grupoOrden ? (datosOrdenAll[r.grupoOrden]?.abonado  || null) : null,
+            contrato:       r.grupoOrden ? (datosOrden[r.grupoOrden]?.contrato || null) : null,
+            abonado:        r.grupoOrden ? (datosOrden[r.grupoOrden]?.abonado  || null) : null,
           })),
         };
       });
@@ -382,10 +367,28 @@ const aprobarDevolucion = async (req, res, next) => {
       }
 
       // Devolver ONUs a sede (disponibles para asignar)
-      await tx.onu.updateMany({
-        where: { cliente: `devolucion_pendiente#${devolucionId}` },
-        data:  { cliente: null, sedeId: devolucion.sedeId },
-      });
+      // Devolver ONUs a sede (disponibles para asignar)
+        const onusDevueltas = await tx.onu.findMany({
+          where: { cliente: `devolucion_pendiente#${devolucionId}` },
+          select: { productoId: true },
+        });
+
+        await tx.onu.updateMany({
+          where: { cliente: `devolucion_pendiente#${devolucionId}` },
+          data:  { cliente: null, sedeId: devolucion.sedeId },
+        });
+
+        // Descontar de asignacionTecnico por cada ONU devuelta
+        for (const onu of onusDevueltas) {
+          await tx.asignacionTecnico.updateMany({
+            where: {
+              tecnicoId:  devolucion.tecnicoId,
+              productoId: onu.productoId,
+              sedeId:     devolucion.sedeId,
+            },
+            data: { cantidad: { decrement: 1 } },
+          });
+        }
 
       // 3. Marcar devolución como aprobada
       await tx.devolucionTecnico.update({
@@ -485,6 +488,9 @@ const revisarRecojo = async (req, res, next) => {
         });
         // Registrar en OnuReciclada
         await tx.onuReciclada.create({
+
+          
+
           data: {
             recojoId:    recojo.id,
             tipoEquipo:  recojo.tipoEquipo || 'ONU',
@@ -496,6 +502,29 @@ const revisarRecojo = async (req, res, next) => {
             revisadoPor: String(req.usuario.id),
           },
         });
+
+        // Si tiene código PON, registrar/actualizar en tabla onus para que esté disponible
+          if (recojo.codigoPon) {
+            const onuExistente = await tx.onu.findUnique({
+              where: { codigoPon: recojo.codigoPon },
+            });
+            if (onuExistente) {
+              await tx.onu.update({
+                where: { codigoPon: recojo.codigoPon },
+                data:  { tecnicoId: null, cliente: null, sedeId, salidaDirecta: false },
+              });
+            } else {
+              await tx.onu.create({
+                data: {
+                  codigoPon:  recojo.codigoPon,
+                  productoId: recojo.productoId,
+                  sedeId,
+                  tecnicoId:  null,
+                  cliente:    null,
+                },
+              });
+            }
+          }
       }
 
       // Descontar del inventario del técnico (siempre: bueno o malogrado)

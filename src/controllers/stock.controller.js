@@ -1016,10 +1016,24 @@ const miInventario = async (req, res, next) => {
     }
 
     // Construir lista de items con métricas
+    // Contar ONUs asignadas al técnico por productoId
+const onusPorProducto = {};
+for (const o of onus) {
+  const pid = o.productoId;
+  if (pid) onusPorProducto[pid] = (onusPorProducto[pid] || 0) + 1;
+}
+
+// Construir lista de items con métricas
     const items = asignaciones.map(a => {
       const asignado  = Number(a.cantidad);
-      const utilizado = consumoPorProducto[a.productoId] || 0;
-      const disponible = Math.max(0, asignado - utilizado);
+      // Si es un producto ONU, disponible = cantidad de ONUs con tecnicoId asignado
+      // Si es producto normal, disponible = asignado - consumido
+      const esOnu = onusPorProducto[a.productoId] !== undefined || 
+        onus.some(o => o.productoId === a.productoId);
+      const utilizado = esOnu ? 0 : (consumoPorProducto[a.productoId] || 0);
+      const disponible = esOnu 
+        ? (onusPorProducto[a.productoId] || 0)
+        : Math.max(0, asignado - utilizado);
       const esMedible      = a.producto.esMedible || false;
       const metrosPorUnidad = a.producto.metrosPorUnidad || null;
       return {
