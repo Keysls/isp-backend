@@ -321,8 +321,8 @@ const listarDevoluciones = async (req, res, next) => {
             estado:         r.estado,
             grupoOrden:     r.grupoOrden || null,
             nombreProducto: r.productoId ? (nombresAll[r.productoId] || null) : null,
-            contrato:       r.grupoOrden ? (datosOrden[r.grupoOrden]?.contrato || null) : null,
-            abonado:        r.grupoOrden ? (datosOrden[r.grupoOrden]?.abonado  || null) : null,
+            contrato: r.grupoOrden ? (datosOrdenAll[r.grupoOrden]?.contrato || null) : null,
+            abonado:  r.grupoOrden ? (datosOrdenAll[r.grupoOrden]?.abonado  || null) : null,
           })),
         };
       });
