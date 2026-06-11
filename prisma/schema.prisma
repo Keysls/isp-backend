@@ -489,6 +489,7 @@ model ConsumoTecnico {
   motivo      String
   descripcion String?
   sedeId      String?
+  codigoPon   String?  @map("codigo_pon") @db.VarChar(100)  // ← AGREGAR
   fecha       DateTime @default(now())
   producto    Producto @relation(fields: [productoId], references: [id])
   tecnico     Tecnico  @relation(fields: [tecnicoId], references: [id])

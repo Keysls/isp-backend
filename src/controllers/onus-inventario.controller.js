@@ -40,6 +40,7 @@ const listar = async (req, res, next) => {
         ...(soloDisponibles && {
           codigoPon: { not: null },
           tecnicoId: null,
+          cliente:   null,
           salidaDirecta: false,
         }),
       },

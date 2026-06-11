@@ -659,6 +659,7 @@ const auditoriaControlador = async (req, res, next) => {
         where: { ...(sedeId && { tecnico: { usuario: { sedeId } } }) },
         select: {
           id: true, fecha: true, cantidad: true, tecnicoId: true, motivo: true, descripcion: true,
+          codigoPon: true,
           producto: { select: { nombre: true, esMedible: true, metrosPorUnidad: true } },
           tecnico: { select: { usuario: { select: { nombre: true, apellido: true } } } },
         },
@@ -737,7 +738,10 @@ const auditoriaControlador = async (req, res, next) => {
         }
 
         return {
-          id: c.id, fecha: c.fecha, tipo: 'consumo', item: c.producto.nombre,
+          id: c.id, fecha: c.fecha, tipo: 'consumo',
+          item: c.codigoPon 
+            ? `${c.producto.nombre} — ${c.codigoPon}` 
+            : c.producto.nombre,
           cantidad: esMedible ? `${cantMostrar % 1 === 0 ? cantMostrar : cantMostrar.toFixed(1)} m` : cantMostrar,
           tecnico_id:     c.tecnicoId,
           tecnico_nombre: c.tecnico?.usuario ? `${c.tecnico.usuario.nombre} ${c.tecnico.usuario.apellido}`.trim() : null,
@@ -1163,7 +1167,11 @@ const registrarConsumo = async (req, res, next) => {
     // La app móvil ya convierte metros→unidades antes de enviar
     // El backend guarda directamente sin reconvertir
     const itemsNormalizados = items.filter(i => i.productoId && Number(i.cantidad) > 0)
-      .map(i => ({ productoId: Number(i.productoId), cantidad: Number(i.cantidad) }));
+      .map(i => ({ 
+        productoId: Number(i.productoId), 
+        cantidad:   Number(i.cantidad),
+        codigoPon:  i.codigoPon || null,
+      }));
 
     const registros = await Promise.all(
       itemsNormalizados.map(i => prisma.consumoTecnico.create({
@@ -1174,6 +1182,7 @@ const registrarConsumo = async (req, res, next) => {
           cantidad:    i.cantidad,
           motivo:      motivo || 'SERVICIO',
           descripcion: descripcion || (ordenId ? `Orden: ${ordenId}` : null),
+          codigoPon:   i.codigoPon || null,  // ← AGREGAR
         },
       }))
     );
@@ -1191,6 +1200,21 @@ const registrarConsumo = async (req, res, next) => {
         data: {
           estado:    'usado',
           comentario: ordenId ? `Usado en orden: ${ordenId}` : 'Usado en servicio',
+        },
+      });
+    }
+
+    // ── Desvincular ONUs instaladas en cliente ─────────────────
+    const itemsConPon = items.filter(i => i.codigoPon);
+    if (itemsConPon.length > 0) {
+      await prisma.onu.updateMany({
+        where: {
+          codigoPon: { in: itemsConPon.map(i => i.codigoPon) },
+          tecnicoId: tecnico.id,
+        },
+        data: {
+          tecnicoId: null,
+          cliente:   ordenId || null,
         },
       });
     }

@@ -14,10 +14,10 @@ const registrarDevolucion = async (req, res, next) => {
     if (!tecnico) return res.status(404).json({ error: 'Técnico no encontrado' });
     if (!tecnico.sedeId) return res.status(400).json({ error: 'Técnico sin sede asignada' });
 
-    const { items = [], recojos = [], comentario } = req.body;
+    const { items = [], recojos = [], onuIds = [], comentario } = req.body;
 
-    if (items.length === 0 && recojos.length === 0)
-      return res.status(400).json({ error: 'Debe indicar al menos un item o recojo' });
+    if (items.length === 0 && recojos.length === 0 && onuIds.length === 0)
+      return res.status(400).json({ error: 'Debe indicar al menos un item, recojo u ONU' });
 
     // ── Validar material regular ─────────────────────────────
     if (items.length > 0) {
@@ -36,6 +36,18 @@ const registrarDevolucion = async (req, res, next) => {
             error: `Stock insuficiente para producto ID ${productoId}. Disponible: ${disponible}`,
           });
       }
+    }
+
+    // ── Validar ONUs ─────────────────────────────────────────────
+    if (onuIds.length > 0) {
+      const onusEncontradas = await prisma.onu.findMany({
+        where: {
+          id:        { in: onuIds.map(Number) },
+          tecnicoId: tecnico.id,
+        },
+      });
+      if (onusEncontradas.length !== onuIds.length)
+        return res.status(400).json({ error: 'Una o más ONUs no son válidas o ya fueron procesadas' });
     }
 
     // ── Validar recojos ──────────────────────────────────────
@@ -74,20 +86,35 @@ const registrarDevolucion = async (req, res, next) => {
       });
 
       // Marcar recojos como "en_revision" → ya salieron de mano del técnico
-      if (recojos.length > 0) {
-        await tx.recojo.updateMany({
-          where: {
-            id:        { in: recojos.map(r => Number(r.recojoId)) },
-            tecnicoId: tecnico.id,
-          },
-          data: {
-            estado:    'en_revision',
-            comentario: `Devuelto en devolución #${dev.id}`,
-          },
-        });
-      }
+      // Marcar recojos como "en_revision"
+  if (recojos.length > 0) {
+    await tx.recojo.updateMany({
+      where: {
+        id:        { in: recojos.map(r => Number(r.recojoId)) },
+        tecnicoId: tecnico.id,
+      },
+      data: {
+        estado:     'en_revision',
+        comentario: `Devuelto en devolución #${dev.id}`,
+      },
+    });
+  }
 
-      return dev;
+    // Marcar ONUs como pendientes de devolución
+    if (onuIds.length > 0) {
+      await tx.onu.updateMany({
+        where: {
+          id:        { in: onuIds.map(Number) },
+          tecnicoId: tecnico.id,
+        },
+        data: {
+          tecnicoId: null,
+          cliente:   `devolucion_pendiente#${dev.id}`,
+        },
+      });
+    }
+
+    return dev;
     });
 
     res.status(201).json({
@@ -309,6 +336,12 @@ const aprobarDevolucion = async (req, res, next) => {
         });
       }
 
+      // Devolver ONUs a sede (disponibles para asignar)
+      await tx.onu.updateMany({
+        where: { cliente: `devolucion_pendiente#${devolucionId}` },
+        data:  { cliente: null, sedeId: devolucion.sedeId },
+      });
+
       // 3. Marcar devolución como aprobada
       await tx.devolucionTecnico.update({
         where: { id: devolucionId },
@@ -348,6 +381,12 @@ const rechazarDevolucion = async (req, res, next) => {
         },
         data: { estado: 'en_mano', comentario: null },
       });
+
+      // Devolver ONUs al técnico si se rechaza
+        await tx.onu.updateMany({
+          where: { cliente: `devolucion_pendiente#${devolucionId}` },
+          data:  { tecnicoId: devolucion.tecnicoId, cliente: null },
+        });
 
       await tx.devolucionTecnico.update({
         where: { id: devolucionId },
