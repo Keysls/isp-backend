@@ -284,22 +284,49 @@ const obtener = async (req, res, next) => {
       return res.status(403).json({ error: 'No tienes acceso a esta orden' });
 
     // Consumos de materiales registrados para esta orden
-    const consumos = await prisma.consumoTecnico.findMany({
-      where: {
-        descripcion: { contains: req.params.id },
-      },
-      include: {
-        producto: {
-          select: {
-            nombre: true, codigo: true, unidad: true,
-            esMedible: true, metrosPorUnidad: true,
+    // Consumos de materiales registrados para esta orden
+      const consumos = await prisma.consumoTecnico.findMany({
+        where: {
+          descripcion: { contains: req.params.id },
+        },
+        include: {
+          producto: {
+            select: {
+              nombre: true, codigo: true, unidad: true,
+              esMedible: true, metrosPorUnidad: true,
+            },
           },
         },
-      },
-      orderBy: { fecha: 'desc' },
-    });
+        orderBy: { fecha: 'desc' },
+      });
 
-    res.json({ ...orden, consumos });
+      // Recojos (equipos recuperados) asociados a esta orden
+      const recojos = await prisma.recojo.findMany({
+        where: { grupoOrden: req.params.id },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // Enriquecer recojos con nombre del producto
+      const productoIds = [...new Set(recojos.map(r => r.productoId).filter(Boolean))];
+      const productos = productoIds.length > 0
+        ? await prisma.producto.findMany({
+            where: { id: { in: productoIds } },
+            select: { id: true, nombre: true },
+          })
+        : [];
+      const nombresMap = Object.fromEntries(productos.map(p => [p.id, p.nombre]));
+
+      const recojosEnriquecidos = recojos.map(r => ({
+        id:             r.id,
+        tipoEquipo:     r.tipoEquipo,
+        codigoPon:      r.codigoPon,
+        estado:         r.estado,
+        nombreProducto: r.productoId ? (nombresMap[r.productoId] || null) : null,
+        comentario:     r.comentario,
+      }));
+
+      res.json({ ...orden, consumos, recojos: recojosEnriquecidos });
+
   } catch (err) { next(err); }
 };
 
