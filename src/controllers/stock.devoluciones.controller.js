@@ -183,12 +183,22 @@ const misDevoluciones = async (req, res, next) => {
       const recojosAsociados = recojosRevision.filter(
         r => r.comentario === `Devuelto en devolución #${d.id}`
       );
+      // ONUs devueltas asociadas a esta devolución
+        const onusDevueltas = await prisma.onu.findMany({
+          where: { cliente: `devolucion_pendiente#${d.id}` },
+          include: { producto: { select: { nombre: true } } },
+        });
       return {
-        id:            d.id,
-        estado:        d.estado,
-        comentario:    d.comentario,
-        fecha:         d.createdAt,
-        fechaRevision: d.fechaRevision,
+          id:            d.id,
+          estado:        d.estado,
+          comentario:    d.comentario,
+          fecha:         d.createdAt,
+          fechaRevision: d.fechaRevision,
+          onus: onusDevueltas.map(o => ({
+            id:        o.id,
+            codigoPon: o.codigoPon,
+            producto:  o.producto?.nombre || null,
+          })),
         detalles: d.detalles.map(det => ({
           productoId: det.productoId,
           nombre:     det.producto.nombre,
