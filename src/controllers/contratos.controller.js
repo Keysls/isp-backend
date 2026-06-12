@@ -278,16 +278,27 @@ const mapa = async (req, res, next) => {
     });
 
     // Para cada contrato, buscar la instalación más reciente CON coordenadas
+    // Para cada contrato, usar coordenadas del contrato primero, luego instalación como fallback
     const puntos = [];
     for (const c of contratos) {
       let coord = null;
-      for (const o of c.ordenes) {
-        if (o.instalacion?.latitud != null && o.instalacion?.longitud != null) {
-          coord = { lat: o.instalacion.latitud, lng: o.instalacion.longitud };
-          break; // ordenes ya viene desc por fecha → la primera con GPS es la más nueva
+
+      // 1. Coordenadas guardadas directamente en el contrato (más recientes)
+      if (c.latitud != null && c.longitud != null) {
+        coord = { lat: c.latitud, lng: c.longitud };
+      }
+
+      // 2. Fallback: coordenadas de la instalación más reciente
+      if (!coord) {
+        for (const o of c.ordenes) {
+          if (o.instalacion?.latitud != null && o.instalacion?.longitud != null) {
+            coord = { lat: o.instalacion.latitud, lng: o.instalacion.longitud };
+            break;
+          }
         }
       }
-      if (!coord) continue; // sin coordenadas → no va al mapa
+
+      if (!coord) continue;
 
       // Determinar qué servicios tiene el contrato (para el badge del popup)
       const tieneInternet = c.ordenes.some(o => TIPOS_INTERNET.includes(o.tipoOrden));

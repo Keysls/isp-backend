@@ -742,3 +742,23 @@ enum TipoNotificacion {
   STOCK_BAJO
   STOCK_CRITICO
 }
+
+// ── Configuración dinámica de tipos de orden ──────────────────
+// Fuente de verdad única — reemplaza los arrays hardcodeados
+model ConfigTipoOrden {
+  codigo          String   @id @map("codigo")         // "INSTALACION_I"
+  label           String   @map("label")              // "Instalación Internet"
+  servicio        String   @map("servicio")           // "INTERNET" | "CABLE" | "DUO"
+  flujo           String   @map("flujo")              // "NOC_TECNICO" | "SOLO_NOC" | "TECNICO_DIRECTO"
+  requiereWan     Boolean  @default(false) @map("requiere_wan")
+  autorizaOlt     Boolean  @default(false) @map("autoriza_olt")
+  esRetiro        Boolean  @default(false) @map("es_retiro")
+  esBaja          Boolean  @default(false) @map("es_baja")
+  esInstalacion   Boolean  @default(false) @map("es_instalacion")
+  esCorte         Boolean  @default(false) @map("es_corte")
+  esCambioEquipo  Boolean  @default(false) @map("es_cambio_equipo")
+  activo          Boolean  @default(true)  @map("activo")
+  orden           Int      @default(0)     @map("orden")
+
+  @@map("config_tipos_orden")
+}

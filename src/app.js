@@ -57,6 +57,7 @@ app.use('/api/productos',       require('./routes/productos.routes'));
 app.use('/api/stock',           require('./routes/stock.routes'));
 app.use('/api/onus',            require('./routes/onus.routes'));
 app.use('/api/activos',         require('./routes/activos.routes'));
+app.use('/api/tipos-orden',     require('./routes/tiposOrden.routes'));
 
 // ─── Health check ──────────────────────────────────────────────
 app.get('/api/health', (req, res) => {

@@ -65,6 +65,7 @@ npm run db:generate
 ### 7. Ejecutar el seed (datos iniciales)
 ```bash
 npm run seed
+node src/utils/seedTiposOrden.js
 npm run db:studio 
 ```
 Esto crea:
