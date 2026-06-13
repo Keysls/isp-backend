@@ -127,7 +127,7 @@ model Contrato {
 
 model OrdenServicio {
   id                String        @id @default(uuid())
-  nServicio         String        @unique
+  nServicio         String
   tipoOrden         TipoOrden
   estado            EstadoOrden   @default(PENDIENTE_NOC)
   fechaServicio     DateTime
@@ -163,6 +163,7 @@ model OrdenServicio {
   sede              Sede?         @relation(fields: [sedeId], references: [id])
   tecnico           Tecnico?      @relation(fields: [tecnicoId], references: [id])
 
+  @@unique([nServicio, sedeId])
   @@index([contrato])
   @@map("ordenes_servicio")
 }

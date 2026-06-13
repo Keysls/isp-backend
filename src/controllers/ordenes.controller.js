@@ -392,7 +392,7 @@ const confirmarExcel = async (req, res, next) => {
 
     for (const o of ordenes) {
       try {
-        const existe = await prisma.ordenServicio.findUnique({ where: { nServicio: String(o.nServicio) } });
+        const existe = await prisma.ordenServicio.findUnique({ where: { nServicio_sedeId: { nServicio: String(o.nServicio), sedeId } } });
         if (existe) { resultados.duplicadas++; continue; }
 
         // Asignar técnico solo si: hay técnico validado Y el tipo no es solo-NOC
@@ -504,8 +504,8 @@ const crear = async (req, res, next) => {
     const sedeId = req.usuario.sedeId;
     if (!sedeId) return res.status(400).json({ error: 'Tu usuario no tiene sede asignada' });
 
-    const existe = await prisma.ordenServicio.findUnique({ where: { nServicio: String(nServicio) } });
-    if (existe) return res.status(409).json({ error: `Ya existe la orden N° ${nServicio}` });
+    const existe = await prisma.ordenServicio.findUnique({ where: { nServicio_sedeId: { nServicio: String(nServicio), sedeId } } });
+    if (existe) return res.status(409).json({ error: `Ya existe la orden N° ${nServicio} en esta sede` });
 
     const orden = await prisma.$transaction(async (tx) => {
       // Upsert del contrato (si vino en el body)
