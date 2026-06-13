@@ -626,10 +626,10 @@ CREATE INDEX "contratos_dni_idx" ON "contratos"("dni");
 CREATE UNIQUE INDEX "contratos_numero_sedeId_key" ON "contratos"("numero", "sedeId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "ordenes_servicio_nServicio_key" ON "ordenes_servicio"("nServicio");
+CREATE INDEX "ordenes_servicio_contrato_idx" ON "ordenes_servicio"("contrato");
 
 -- CreateIndex
-CREATE INDEX "ordenes_servicio_contrato_idx" ON "ordenes_servicio"("contrato");
+CREATE UNIQUE INDEX "ordenes_servicio_nServicio_sedeId_key" ON "ordenes_servicio"("nServicio", "sedeId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "instalaciones_ordenId_key" ON "instalaciones"("ordenId");

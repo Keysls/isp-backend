@@ -103,6 +103,9 @@ const entradaStock = async (req, res, next) => {
             registradoPor: req.usuario?.id ? String(req.usuario.id) : null,
             sedeId: String(sedeId),
             comentario: req.body.comentario || req.body.motivo || null,
+            fecha: req.body.fechaEntrada
+              ? new Date(req.body.fechaEntrada + 'T12:00:00')
+              : new Date(),
           },
         });
         await tx.producto.update({ where: { id: productoId }, data: { stockTotal: { increment: cantidad } } });
@@ -352,7 +355,9 @@ const enviarProductosSede = async (req, res, next) => {
           usuarioId: req.usuario.id,
           guia,
           comentario,
-          fechaEnvio: new Date(),
+          fechaEnvio: req.body.fechaEnvio 
+            ? new Date(req.body.fechaEnvio + 'T12:00:00') 
+            : new Date(),
           estado: 'PENDIENTE',
         },
       });
