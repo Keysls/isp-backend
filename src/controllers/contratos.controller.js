@@ -138,9 +138,10 @@ const listar = async (req, res, next) => {
 const obtener = async (req, res, next) => {
   try {
     const esSoloInternet = req.query.soloInternet === 'true';
+    const sedeId = req.usuario.rol === 'ADMIN' ? req.usuario.sedeId : (req.query.sedeId || req.usuario.sedeId);
 
     const contrato = await prisma.contrato.findUnique({
-      where: { numero: req.params.numero },
+      where: { numero_sedeId: { numero: req.params.numero, sedeId } },
       include: {
         sede: { select: { id: true, nombre: true, ciudad: true } },
         plan:    { select: { nombre: true, mbps: true } }, 
@@ -278,27 +279,16 @@ const mapa = async (req, res, next) => {
     });
 
     // Para cada contrato, buscar la instalación más reciente CON coordenadas
-    // Para cada contrato, usar coordenadas del contrato primero, luego instalación como fallback
     const puntos = [];
     for (const c of contratos) {
       let coord = null;
-
-      // 1. Coordenadas guardadas directamente en el contrato (más recientes)
-      if (c.latitud != null && c.longitud != null) {
-        coord = { lat: c.latitud, lng: c.longitud };
-      }
-
-      // 2. Fallback: coordenadas de la instalación más reciente
-      if (!coord) {
-        for (const o of c.ordenes) {
-          if (o.instalacion?.latitud != null && o.instalacion?.longitud != null) {
-            coord = { lat: o.instalacion.latitud, lng: o.instalacion.longitud };
-            break;
-          }
+      for (const o of c.ordenes) {
+        if (o.instalacion?.latitud != null && o.instalacion?.longitud != null) {
+          coord = { lat: o.instalacion.latitud, lng: o.instalacion.longitud };
+          break; // ordenes ya viene desc por fecha → la primera con GPS es la más nueva
         }
       }
-
-      if (!coord) continue;
+      if (!coord) continue; // sin coordenadas → no va al mapa
 
       // Determinar qué servicios tiene el contrato (para el badge del popup)
       const tieneInternet = c.ordenes.some(o => TIPOS_INTERNET.includes(o.tipoOrden));
@@ -333,31 +323,23 @@ const mapa = async (req, res, next) => {
 };
 
 // ── PATCH /api/contratos/:numero/wan ──────────────────────────
-// Registra o actualiza la IP/máscara/gateway del contrato.
-// Esta WAN se hereda a las órdenes nuevas del contrato.
 const guardarWan = async (req, res, next) => {
   try {
     const { ipWan, mascara, gateway } = req.body;
+    const sedeId = req.usuario.rol === 'ADMIN' ? req.usuario.sedeId : (req.query.sedeId || req.usuario.sedeId);
 
-    // Validación simple de formato IP
     const esIp = (v) => /^(\d{1,3}\.){3}\d{1,3}$/.test(v || '');
     if (!esIp(ipWan))   return res.status(400).json({ error: 'IP WAN inválida' });
     if (!esIp(mascara)) return res.status(400).json({ error: 'Máscara inválida' });
     if (!esIp(gateway)) return res.status(400).json({ error: 'Gateway inválido' });
 
-    // El contrato debe existir
     const contrato = await prisma.contrato.findUnique({
-      where: { numero: req.params.numero },
+      where: { numero_sedeId: { numero: req.params.numero, sedeId } },
     });
     if (!contrato) return res.status(404).json({ error: 'Contrato no encontrado' });
 
-    // Scope por rol: ADMIN solo su sede
-    if (req.usuario.rol === 'ADMIN' && contrato.sedeId !== req.usuario.sedeId) {
-      return res.status(403).json({ error: 'No tienes acceso a este contrato' });
-    }
-
     const actualizado = await prisma.contrato.update({
-      where: { numero: req.params.numero },
+      where: { numero_sedeId: { numero: req.params.numero, sedeId } },
       data:  { ipWan, mascara, gateway },
     });
 
@@ -449,10 +431,10 @@ const confirmarExcel = async (req, res, next) => {
           continue;
         }
 
-        const existe = await prisma.contrato.findUnique({ where: { numero: c.numero } });
+        const existe = await prisma.contrato.findUnique({ where: { numero_sedeId: { numero: c.numero, sedeId } } });
 
         await prisma.contrato.upsert({
-          where:  { numero: c.numero },
+          where:  { numero_sedeId: { numero: c.numero, sedeId } },
           create: {
             numero:       c.numero,
             abonado:      c.abonado,
@@ -510,13 +492,15 @@ const actualizarUbicacion = async (req, res, next) => {
     if (isNaN(lat) || isNaN(lng))
       return res.status(400).json({ error: 'Coordenadas inválidas' });
 
+    const sedeId = req.usuario.rol === 'ADMIN' ? req.usuario.sedeId : (req.query.sedeId || req.usuario.sedeId);
+
     const contrato = await prisma.contrato.findUnique({
-      where: { numero: req.params.numero },
+      where: { numero_sedeId: { numero: req.params.numero, sedeId } },
     });
     if (!contrato) return res.status(404).json({ error: 'Contrato no encontrado' });
 
     const actualizado = await prisma.contrato.update({
-      where: { numero: req.params.numero },
+      where: { numero_sedeId: { numero: req.params.numero, sedeId } },
       data:  { latitud: lat, longitud: lng },
     });
 
@@ -543,13 +527,15 @@ const actualizarPrecinto = async (req, res, next) => {
     if (precinto === undefined)
       return res.status(400).json({ error: 'precinto es requerido' });
 
+    const sedeId = req.usuario.rol === 'ADMIN' ? req.usuario.sedeId : (req.query.sedeId || req.usuario.sedeId);
+
     const contrato = await prisma.contrato.findUnique({
-      where: { numero: req.params.numero },
+      where: { numero_sedeId: { numero: req.params.numero, sedeId } },
     });
     if (!contrato) return res.status(404).json({ error: 'Contrato no encontrado' });
 
     const actualizado = await prisma.contrato.update({
-      where: { numero: req.params.numero },
+      where: { numero_sedeId: { numero: req.params.numero, sedeId } },
       data:  { precinto: precinto || null },
     });
 

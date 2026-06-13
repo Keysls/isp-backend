@@ -95,7 +95,8 @@ model TokenSesion {
 }
 
 model Contrato {
-  numero       String          @id
+  id           String          @id @default(uuid())
+  numero       String
   abonado      String
   dni          String?
   celular      String?
@@ -114,10 +115,11 @@ model Contrato {
   updatedAt    DateTime        @updatedAt
   mbps         Int?
   planId       String?         @map("plan_id")
-  plan    PlanInternet? @relation(fields: [planId], references: [id]) 
+  plan         PlanInternet?   @relation(fields: [planId], references: [id])
   sede         Sede            @relation(fields: [sedeId], references: [id])
   ordenes      OrdenServicio[]
 
+  @@unique([numero, sedeId])
   @@index([sedeId])
   @@index([dni])
   @@map("contratos")
@@ -156,7 +158,7 @@ model OrdenServicio {
   mbps              Int?
   planId            String?       @map("plan_id")
   instalacion       Instalacion?
-  contratoRef       Contrato?     @relation(fields: [contrato], references: [numero])
+  contratoRef       Contrato?     @relation(fields: [contrato, sedeId], references: [numero, sedeId])
   plan              PlanInternet? @relation(fields: [planId], references: [id])
   sede              Sede?         @relation(fields: [sedeId], references: [id])
   tecnico           Tecnico?      @relation(fields: [tecnicoId], references: [id])

@@ -82,6 +82,7 @@ CREATE TABLE "tokens_sesion" (
 
 -- CreateTable
 CREATE TABLE "contratos" (
+    "id" TEXT NOT NULL,
     "numero" TEXT NOT NULL,
     "abonado" TEXT NOT NULL,
     "dni" TEXT,
@@ -102,7 +103,7 @@ CREATE TABLE "contratos" (
     "mbps" INTEGER,
     "plan_id" TEXT,
 
-    CONSTRAINT "contratos_pkey" PRIMARY KEY ("numero")
+    CONSTRAINT "contratos_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -431,6 +432,7 @@ CREATE TABLE "consumo_tecnico" (
     "motivo" TEXT NOT NULL,
     "descripcion" TEXT,
     "sedeId" TEXT,
+    "codigo_pon" VARCHAR(100),
     "fecha" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "consumo_tecnico_pkey" PRIMARY KEY ("id")
@@ -583,6 +585,25 @@ CREATE TABLE "planes_internet" (
     CONSTRAINT "planes_internet_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "config_tipos_orden" (
+    "codigo" TEXT NOT NULL,
+    "label" TEXT NOT NULL,
+    "servicio" TEXT NOT NULL,
+    "flujo" TEXT NOT NULL,
+    "requiere_wan" BOOLEAN NOT NULL DEFAULT false,
+    "autoriza_olt" BOOLEAN NOT NULL DEFAULT false,
+    "es_retiro" BOOLEAN NOT NULL DEFAULT false,
+    "es_baja" BOOLEAN NOT NULL DEFAULT false,
+    "es_instalacion" BOOLEAN NOT NULL DEFAULT false,
+    "es_corte" BOOLEAN NOT NULL DEFAULT false,
+    "es_cambio_equipo" BOOLEAN NOT NULL DEFAULT false,
+    "activo" BOOLEAN NOT NULL DEFAULT true,
+    "orden" INTEGER NOT NULL DEFAULT 0,
+
+    CONSTRAINT "config_tipos_orden_pkey" PRIMARY KEY ("codigo")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "usuarios_email_key" ON "usuarios"("email");
 
@@ -600,6 +621,9 @@ CREATE INDEX "contratos_sedeId_idx" ON "contratos"("sedeId");
 
 -- CreateIndex
 CREATE INDEX "contratos_dni_idx" ON "contratos"("dni");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "contratos_numero_sedeId_key" ON "contratos"("numero", "sedeId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ordenes_servicio_nServicio_key" ON "ordenes_servicio"("nServicio");
@@ -686,7 +710,7 @@ ALTER TABLE "contratos" ADD CONSTRAINT "contratos_plan_id_fkey" FOREIGN KEY ("pl
 ALTER TABLE "contratos" ADD CONSTRAINT "contratos_sedeId_fkey" FOREIGN KEY ("sedeId") REFERENCES "sedes"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ordenes_servicio" ADD CONSTRAINT "ordenes_servicio_contrato_fkey" FOREIGN KEY ("contrato") REFERENCES "contratos"("numero") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ordenes_servicio" ADD CONSTRAINT "ordenes_servicio_contrato_sedeId_fkey" FOREIGN KEY ("contrato", "sedeId") REFERENCES "contratos"("numero", "sedeId") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ordenes_servicio" ADD CONSTRAINT "ordenes_servicio_plan_id_fkey" FOREIGN KEY ("plan_id") REFERENCES "planes_internet"("id") ON DELETE SET NULL ON UPDATE CASCADE;

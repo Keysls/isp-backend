@@ -43,15 +43,13 @@ const ESTADOS_NO_FORZABLES_POR_ADMIN = ['ACEPTADA', 'EN_PROCESO', 'COMPLETADA'];
 
 // ── Helper: ¿una orden puede heredar la WAN del contrato? ──
 // Devuelve los datos WAN a heredar, o null si no aplica.
-const wanHeredableDelContrato = async (tx, numeroContrato, tipoOrden, hayTecnico) => {
-  // Solo tipos que van por técnico y necesitan WAN
+const wanHeredableDelContrato = async (tx, numeroContrato, tipoOrden, hayTecnico, sedeId) => {
   if (!TIPOS_NOC_TECNICO.includes(tipoOrden)) return null;
-  // Sin técnico no puede ir a "esperando técnico"
   if (!hayTecnico) return null;
-  if (!numeroContrato) return null;
+  if (!numeroContrato || !sedeId) return null;
 
   const contrato = await tx.contrato.findUnique({
-    where:  { numero: String(numeroContrato).trim() },
+    where:  { numero_sedeId: { numero: String(numeroContrato).trim(), sedeId } },
     select: { ipWan: true, mascara: true, gateway: true },
   });
 
@@ -88,7 +86,7 @@ const upsertContratoDesdeOrden = async (tx, orden, sedeId) => {
         : null;
 
   await tx.contrato.upsert({
-    where: { numero },
+    where: { numero_sedeId: { numero, sedeId } },
     create: {
       numero,
       abonado:    orden.abonado,
@@ -405,7 +403,7 @@ const confirmarExcel = async (req, res, next) => {
           await upsertContratoDesdeOrden(tx, o, sedeId);
         
           // 2. ¿El contrato ya tiene WAN?
-          const wanHeredada = await wanHeredableDelContrato(tx, o.contrato, o.tipoOrden, asignar);
+          const wanHeredada = await wanHeredableDelContrato(tx, o.contrato, o.tipoOrden, asignar, sedeId);
         
           // 3. Estado inicial
           const estadoInicial = wanHeredada
@@ -436,7 +434,7 @@ const confirmarExcel = async (req, res, next) => {
           // El plan más reciente siempre gana (refleja el plan actual del cliente)
           if (o.contrato && planId) {
             await tx.contrato.update({
-              where: { numero: String(o.contrato).trim() },
+              where: { numero_sedeId: { numero: String(o.contrato).trim(), sedeId } },
               data:  { mbps, planId },
             });
           }
@@ -514,7 +512,7 @@ const crear = async (req, res, next) => {
       await upsertContratoDesdeOrden(tx, { contrato, abonado, dni, celular, direccion, referencia: null, sector }, sedeId);
 
       // ¿El contrato ya tiene WAN? (en 'crear' no se asigna técnico → no hereda)
-      const wanHeredada = await wanHeredableDelContrato(tx, contrato, tipoOrden, false);
+      const wanHeredada = await wanHeredableDelContrato(tx, contrato, tipoOrden, false, sedeId);
 
       const estadoInicial = wanHeredada
         ? 'PENDIENTE_TECNICO'
@@ -574,7 +572,7 @@ const asignar = async (req, res, next) => {
     // Solo aplica si la orden todavía no tiene WAN propia (no pisar una ya configurada).
     const orden = await prisma.$transaction(async (tx) => {
       const wanHeredada = !ordenActual.ipWan
-        ? await wanHeredableDelContrato(tx, ordenActual.contrato, ordenActual.tipoOrden, true)
+        ? await wanHeredableDelContrato(tx, ordenActual.contrato, ordenActual.tipoOrden, true, ordenActual.sedeId)
         : null;
 
       // Estado final:
@@ -669,9 +667,9 @@ const ponerWan = async (req, res, next) => {
       });
 
       // 3. Copiar la WAN al contrato (fuente de verdad para órdenes futuras)
-      if (ordenWan.contrato) {
+      if (ordenWan.contrato && ordenWan.sedeId) {
         await tx.contrato.updateMany({
-          where: { numero: ordenWan.contrato },
+          where: { numero: ordenWan.contrato, sedeId: ordenWan.sedeId },
           data:  { ipWan, mascara, gateway },
         });
       }
