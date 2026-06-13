@@ -270,9 +270,7 @@ const mapa = async (req, res, next) => {
             tipoOrden: true,
             estado:    true,
             fechaServicio: true,
-            instalacion: {
-              select: { latitud: true, longitud: true, fechaFin: true },
-            },
+            // ya no necesitás traer instalacion para las coords
           },
         },
       },
@@ -280,37 +278,29 @@ const mapa = async (req, res, next) => {
 
     // Para cada contrato, buscar la instalación más reciente CON coordenadas
     const puntos = [];
-    for (const c of contratos) {
-      let coord = null;
-      for (const o of c.ordenes) {
-        if (o.instalacion?.latitud != null && o.instalacion?.longitud != null) {
-          coord = { lat: o.instalacion.latitud, lng: o.instalacion.longitud };
-          break; // ordenes ya viene desc por fecha → la primera con GPS es la más nueva
-        }
-      }
-      if (!coord) continue; // sin coordenadas → no va al mapa
+for (const c of contratos) {
+  // ✅ Leer coords del contrato directamente
+  if (c.latitud == null || c.longitud == null) continue;
 
-      // Determinar qué servicios tiene el contrato (para el badge del popup)
-      const tieneInternet = c.ordenes.some(o => TIPOS_INTERNET.includes(o.tipoOrden));
-      const tieneCable    = c.ordenes.some(o => TIPOS_CABLE.includes(o.tipoOrden));
-      const tieneDuo      = c.ordenes.some(o => TIPOS_DUO.includes(o.tipoOrden));
-      let servicioLabel = 'Cable';
-      if (tieneDuo)                    servicioLabel = 'Duo';
-      else if (tieneInternet && tieneCable) servicioLabel = 'Duo';
-      else if (tieneInternet)          servicioLabel = 'Internet';
+  const tieneInternet = c.ordenes.some(o => TIPOS_INTERNET.includes(o.tipoOrden));
+  const tieneCable    = c.ordenes.some(o => TIPOS_CABLE.includes(o.tipoOrden));
+  const tieneDuo      = c.ordenes.some(o => TIPOS_DUO.includes(o.tipoOrden));
+  let servicioLabel = 'Cable';
+  if (tieneDuo || (tieneInternet && tieneCable)) servicioLabel = 'Duo';
+  else if (tieneInternet) servicioLabel = 'Internet';
 
-      puntos.push({
-        numero:    c.numero,
-        abonado:   c.abonado,
-        direccion: c.direccion,
-        sector:    c.sector,
-        sede:      c.sede,
-        estado:    calcularEstado(c.ordenes),
-        servicio:  servicioLabel,
-        latitud:   coord.lat,
-        longitud:  coord.lng,
-      });
-    }
+  puntos.push({
+    numero:    c.numero,
+    abonado:   c.abonado,
+    direccion: c.direccion,
+    sector:    c.sector,
+    sede:      c.sede,
+    estado:    calcularEstado(c.ordenes),
+    servicio:  servicioLabel,
+    latitud:   c.latitud,   // ✅ del contrato
+    longitud:  c.longitud,  // ✅ del contrato
+  });
+}
 
     // Filtro por estado si vino
     const filtrados = estado ? puntos.filter(p => p.estado === estado) : puntos;
