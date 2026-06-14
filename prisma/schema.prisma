@@ -285,7 +285,7 @@ model OltModelo {
 
 model Olt {
   id                String        @id @default(dbgenerated("(gen_random_uuid())::text"))
-  nombre            String        @unique @db.VarChar(150)
+  nombre            String        @db.VarChar(150)
   direccionIp       String        @db.VarChar(45)
   fabricanteId      Int
   modeloId          Int
@@ -309,7 +309,6 @@ model Olt {
   modelo            OltModelo     @relation(fields: [modeloId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   sede              Sede          @relation(fields: [sedeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@unique([direccionIp, puertoSsh])
   @@map("olts")
 }
 
