@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node --openssl-legacy-provider src/app.js",
     "dev": "nodemon --exec \"node --openssl-legacy-provider\" src/app.js",
+    "start": "node --openssl-legacy-provider src/app.js",
     "seed": "node src/utils/seed.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
