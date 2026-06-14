@@ -309,6 +309,8 @@ model Olt {
   modelo            OltModelo     @relation(fields: [modeloId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   sede              Sede          @relation(fields: [sedeId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  @@unique([nombre, sedeId])
+  @@unique([direccionIp, puertoSsh, sedeId])
   @@map("olts")
 }
 
