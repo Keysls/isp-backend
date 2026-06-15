@@ -84,6 +84,14 @@ router.post('/', requireRol('SUPERADMIN'), async (req, res, next) => {
     if (!nombre || !apellido || !email || !password || !rol)
       return res.status(400).json({ error: 'Faltan campos requeridos' });
 
+    // Validar fortaleza de contraseña
+    if (password.length < 8)
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
+    if (!/[A-Z]/.test(password))
+      return res.status(400).json({ error: 'La contraseña debe contener al menos una mayúscula' });
+    if (!/[0-9]/.test(password))
+      return res.status(400).json({ error: 'La contraseña debe contener al menos un número' });
+
     const rolesPermitidos = ['SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'];
     if (!rolesPermitidos.includes(rol))
       return res.status(400).json({ error: `Rol inválido. Permitidos: ${rolesPermitidos.join(', ')}` });

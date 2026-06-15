@@ -163,6 +163,9 @@ model OrdenServicio {
   mensualidad       Decimal?      @db.Decimal(10, 2)
   mbps              Int?
   planId            String?       @map("plan_id")
+  // ── Soft delete ──────────────────────────────────────────
+  deletedAt         DateTime?
+  deletedBy         String?
   instalacion       Instalacion?
   contratoRef       Contrato?     @relation(fields: [contrato, sedeId], references: [numero, sedeId])
   plan              PlanInternet? @relation(fields: [planId], references: [id])
@@ -772,4 +775,16 @@ model ConfigTipoOrden {
   orden           Int      @default(0)     @map("orden")
 
   @@map("config_tipos_orden")
+}
+
+// ── Recuperación de contraseña ────────────────────────────────
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  usuarioId String
+  token     String   @unique
+  expiresAt DateTime
+  usado     Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("password_reset_tokens")
 }

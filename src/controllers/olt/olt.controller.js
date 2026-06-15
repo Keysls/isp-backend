@@ -64,6 +64,14 @@ const crear = async (req, res, next) => {
     if (!nombre || !direccionIp || !fabricanteId || !modeloId || !usuario || !contrasena)
       return res.status(400).json({ error: 'Faltan campos requeridos' });
 
+    // Validar formato de IP
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipRegex.test(direccionIp.trim()))
+      return res.status(400).json({ error: 'Formato de IP inválido' });
+    const octetos = direccionIp.trim().split('.').map(Number);
+    if (octetos.some(o => o < 0 || o > 255))
+      return res.status(400).json({ error: 'IP fuera de rango' });
+
     const sedeId = req.usuario.rol === 'ADMIN' ? req.usuario.sedeId : sedeIdBody;
     if (!sedeId) return res.status(400).json({ error: 'Se requiere una sede' });
 

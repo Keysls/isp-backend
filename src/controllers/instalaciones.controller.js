@@ -198,6 +198,13 @@ const guardarConfigOnu = async (req, res, next) => {
       where: { instalacionId: req.params.instalacionId },
     });
 
+    // Validar formato de serialNumber (código PON) si se proporciona
+    if (serialNumber && serialNumber.trim()) {
+      const ponRegex = /^[A-Za-z0-9]{4,20}$/;
+      if (!ponRegex.test(serialNumber.trim()))
+        return res.status(400).json({ error: 'Formato de serial ONU inválido. Solo letras y números, 4-20 caracteres.' });
+    }
+
     const config = await prisma.configOnu.upsert({
       where:  { instalacionId: req.params.instalacionId },
       create: {

@@ -45,6 +45,9 @@ router.patch('/:id/estado', requireRol('SUPERADMIN', 'ADMIN', 'SECRETARIA'), ctr
 // Editar datos de la orden
 router.patch('/:id/datos', requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN', 'SECRETARIA'), ctrl.actualizarDatos);
 
-
+// ── Papelera de reciclaje ─────────────────────────────────────
+router.get('/papelera',        requireRol('SUPERADMIN', 'ADMIN'), ctrl.papelera);
+router.delete('/:id',          requireRol('SUPERADMIN', 'ADMIN'), ctrl.eliminar);
+router.patch('/:id/restaurar', requireRol('SUPERADMIN', 'ADMIN'), ctrl.restaurar);
 
 module.exports = router;

@@ -3,6 +3,14 @@ const jwt    = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const prisma = require('../utils/prisma');
 
+// ── Validación de contraseña segura ────────────────────────────
+const validarPassword = (pass) => {
+  if (!pass || pass.length < 8)          return 'Mínimo 8 caracteres';
+  if (!/[A-Z]/.test(pass))               return 'Debe contener al menos una mayúscula';
+  if (!/[0-9]/.test(pass))               return 'Debe contener al menos un número';
+  return null; // válida
+};
+
 const detectarDispositivo = (ua) => {
   if (/Mobile|Android|iPhone|iPad/i.test(ua)) return 'móvil';
   if (/Tablet/i.test(ua)) return 'tablet';
@@ -200,8 +208,9 @@ const cambiarPassword = async (req, res, next) => {
     const { passwordActual, passwordNueva } = req.body;
     if (!passwordActual || !passwordNueva)
       return res.status(400).json({ error: 'Faltan campos' });
-    if (passwordNueva.length < 8)
-      return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 8 caracteres' });
+
+    const errorPass = validarPassword(passwordNueva);
+    if (errorPass) return res.status(400).json({ error: errorPass });
 
     const usuario = await prisma.usuario.findUnique({ where: { id: req.usuario.id } });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
@@ -216,7 +225,6 @@ const cambiarPassword = async (req, res, next) => {
     res.json({ ok: true });
   } catch (err) { next(err); }
 };
-
 
 // POST /api/auth/refresh — renueva el access token con el refresh token
 const refresh = async (req, res, next) => {
@@ -254,6 +262,106 @@ const refresh = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── POST /api/auth/solicitar-reset ────────────────────────────
+// El SUPERADMIN genera un token de reset para cualquier usuario
+// (no enviamos email por ahora — el token se devuelve para compartir manualmente)
+const solicitarReset = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email requerido' });
+
+    const usuario = await prisma.usuario.findUnique({
+      where: { email: email.toLowerCase().trim() },
+    });
+
+    // Siempre responder igual para no revelar si el email existe
+    if (!usuario || !usuario.activo) {
+      return res.json({ ok: true, mensaje: 'Si el email existe, se generó un token de reset' });
+    }
+
+    // Invalidar tokens anteriores
+    await prisma.passwordResetToken.updateMany({
+      where: { usuarioId: usuario.id, usado: false },
+      data:  { usado: true },
+    });
+
+    const { randomBytes } = require('crypto');
+    const token     = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutos
+
+    await prisma.passwordResetToken.create({
+      data: { usuarioId: usuario.id, token, expiresAt },
+    });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId: req.usuario?.id || null,
+        accion:    'SOLICITAR_RESET_PASSWORD',
+        detalles:  { email: usuario.email },
+        ip:        req.ip,
+      },
+    });
+
+    // En producción esto se enviaría por email
+    // Por ahora el SUPERADMIN comparte el token manualmente
+    res.json({
+      ok:      true,
+      token,   // solo devolver si es SUPERADMIN (el middleware ya verifica)
+      expira:  expiresAt,
+      mensaje: 'Token de reset generado. Expira en 30 minutos.',
+    });
+  } catch (err) { next(err); }
+};
+
+// ── POST /api/auth/reset-password ─────────────────────────────
+const resetPassword = async (req, res, next) => {
+  try {
+    const { token, passwordNueva } = req.body;
+    if (!token || !passwordNueva)
+      return res.status(400).json({ error: 'Token y nueva contraseña requeridos' });
+
+    const errorPass = validarPassword(passwordNueva);
+    if (errorPass) return res.status(400).json({ error: errorPass });
+
+    const resetToken = await prisma.passwordResetToken.findUnique({ where: { token } });
+
+    if (!resetToken || resetToken.usado)
+      return res.status(400).json({ error: 'Token inválido o ya utilizado' });
+
+    if (resetToken.expiresAt < new Date())
+      return res.status(400).json({ error: 'Token expirado' });
+
+    const hash = await bcrypt.hash(passwordNueva, 12);
+
+    await prisma.$transaction([
+      prisma.usuario.update({
+        where: { id: resetToken.usuarioId },
+        data:  { password: hash },
+      }),
+      prisma.passwordResetToken.update({
+        where: { id: resetToken.id },
+        data:  { usado: true },
+      }),
+      // Cerrar todas las sesiones activas
+      prisma.tokenSesion.updateMany({
+        where: { usuarioId: resetToken.usuarioId, activo: true },
+        data:  { activo: false },
+      }),
+    ]);
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId: resetToken.usuarioId,
+        accion:    'RESET_PASSWORD',
+        ip:        req.ip,
+      },
+    });
+
+    res.json({ ok: true, mensaje: 'Contraseña actualizada correctamente. Inicia sesión de nuevo.' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   cambiarPassword, login, logout, me, refresh,
+  solicitarReset, resetPassword,
 };

@@ -139,7 +139,7 @@ const listar = async (req, res, next) => {
     const { estado, tecnicoId, page = 1, limit = 20, tipos, search, sedeId } = req.query;
     const { rol, sedeId: miSede } = req.usuario;
 
-    let where = {};
+    let where = { deletedAt: null }; // excluir órdenes en papelera
 
     if (rol === 'TECNICO') {
       where = {
@@ -1099,8 +1099,79 @@ const notificaciones = async (req, res, next) => {
 };
 
 
+// ── DELETE /api/ordenes/:id — soft delete ─────────────────────
+const eliminar = async (req, res, next) => {
+  try {
+    const orden = await prisma.ordenServicio.findUnique({ where: { id: req.params.id } });
+    if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
+    if (orden.deletedAt) return res.status(400).json({ error: 'Orden ya eliminada' });
+
+    await prisma.ordenServicio.update({
+      where: { id: req.params.id },
+      data:  { deletedAt: new Date(), deletedBy: req.usuario.id },
+    });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario.id,
+        accion:     'ELIMINAR_ORDEN',
+        tabla:      'ordenes_servicio',
+        registroId: orden.id,
+        detalles:   { nServicio: orden.nServicio, abonado: orden.abonado },
+        ip:         req.ip,
+      },
+    });
+
+    res.json({ ok: true, mensaje: 'Orden movida a papelera' });
+  } catch (err) { next(err); }
+};
+
+// ── PATCH /api/ordenes/:id/restaurar — restaurar de papelera ──
+const restaurar = async (req, res, next) => {
+  try {
+    const orden = await prisma.ordenServicio.findUnique({ where: { id: req.params.id } });
+    if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
+    if (!orden.deletedAt) return res.status(400).json({ error: 'Orden no está eliminada' });
+
+    await prisma.ordenServicio.update({
+      where: { id: req.params.id },
+      data:  { deletedAt: null, deletedBy: null },
+    });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario.id,
+        accion:     'RESTAURAR_ORDEN',
+        tabla:      'ordenes_servicio',
+        registroId: orden.id,
+        detalles:   { nServicio: orden.nServicio, abonado: orden.abonado },
+        ip:         req.ip,
+      },
+    });
+
+    res.json({ ok: true, mensaje: 'Orden restaurada correctamente' });
+  } catch (err) { next(err); }
+};
+
+// ── GET /api/ordenes/papelera — listar eliminadas ─────────────
+const papelera = async (req, res, next) => {
+  try {
+    const ordenes = await prisma.ordenServicio.findMany({
+      where:   { deletedAt: { not: null } },
+      orderBy: { deletedAt: 'desc' },
+      take:    100,
+      select:  {
+        id: true, nServicio: true, abonado: true, tipoOrden: true,
+        deletedAt: true, deletedBy: true, createdAt: true,
+      },
+    });
+    res.json(ordenes);
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   listar, obtener, subirExcel, confirmarExcel, crear,
   asignar, ponerWan, nocCompletar, aceptar, cambiarEstado,
   stats, actualizarDatos, historialWan, reportes, notificaciones,
+  eliminar, restaurar, papelera,
 };
