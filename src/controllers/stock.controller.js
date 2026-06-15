@@ -104,7 +104,7 @@ const entradaStock = async (req, res, next) => {
             sedeId: String(sedeId),
             comentario: req.body.comentario || req.body.motivo || null,
             fecha: req.body.fechaEntrada
-              ? new Date(req.body.fechaEntrada + 'T12:00:00')
+              ? new Date(req.body.fechaEntrada)
               : new Date(),
           },
         });
@@ -356,8 +356,8 @@ const enviarProductosSede = async (req, res, next) => {
           guia,
           comentario,
           fechaEnvio: req.body.fechaEnvio 
-            ? new Date(req.body.fechaEnvio + 'T12:00:00') 
-            : new Date(),
+        ? new Date(req.body.fechaEnvio) 
+        : new Date(),
           estado: 'PENDIENTE',
         },
       });
