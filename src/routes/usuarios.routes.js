@@ -196,37 +196,25 @@ router.post('/secretarios', requireRol('ADMIN'), async (req, res, next) => {
 // RUTAS PARAMÉTRICAS (deben ir DESPUÉS de las literales)
 // ═════════════════════════════════════════════════════════════
 
-// ─────────────────────────────────────────────────────────────
-// PATCH /api/usuarios/:id — SUPERADMIN edita cualquier usuario
-// ─────────────────────────────────────────────────────────────
-router.patch('/:id', requireRol('SUPERADMIN', 'ADMIN'), async (req, res, next) => {
+
+// PATCH /api/usuarios/:id/cerrar-sesion — SUPERADMIN fuerza logout
+router.patch('/:id/cerrar-sesion', requireRol('SUPERADMIN'), async (req, res, next) => {
   try {
-    const { nombre, apellido, telefono, sedeId, activo, dni } = req.body;
-
-    // ADMIN solo puede editar usuarios de su propia sede
-    if (req.usuario.rol === 'ADMIN') {
-      const target = await prisma.usuario.findUnique({ where: { id: req.params.id } });
-      if (!target || target.sedeId !== req.usuario.sedeId)
-        return res.status(403).json({ error: 'No autorizado' });
-    }
-
-    const usuario = await prisma.usuario.update({
-      where: { id: req.params.id },
+    await prisma.tokenSesion.updateMany({
+      where: { usuarioId: req.params.id, activo: true },
+      data:  { activo: false },
+    });
+    await prisma.logActividad.create({
       data: {
-        ...(nombre   && { nombre }),
-        ...(apellido && { apellido }),
-        ...(telefono !== undefined && { telefono }),
-        ...(sedeId   !== undefined && { sedeId }),
-        ...(activo   !== undefined && { activo }),
-      },
-      select: {
-        id: true, nombre: true, apellido: true, email: true,
-        rol: true, telefono: true, activo: true,
-        sede: { select: { id: true, nombre: true } },
+        usuarioId:  req.usuario.id,
+        accion:     'CERRAR_SESION_FORZADO',
+        tabla:      'usuarios',
+        registroId: req.params.id,
+        detalles:   { motivo: 'Forzado por SUPERADMIN' },
+        ip:         req.ip,
       },
     });
-
-    res.json(usuario);
+    res.json({ ok: true, mensaje: 'Sesión cerrada correctamente' });
   } catch (err) { next(err); }
 });
 
@@ -279,6 +267,41 @@ router.patch('/:id/password', async (req, res, next) => {
     await prisma.usuario.update({ where: { id: req.params.id }, data: { password: hash } });
 
     res.json({ mensaje: 'Contraseña actualizada correctamente' });
+  } catch (err) { next(err); }
+});
+
+
+// ─────────────────────────────────────────────────────────────
+// PATCH /api/usuarios/:id — SUPERADMIN edita cualquier usuario
+// ─────────────────────────────────────────────────────────────
+router.patch('/:id', requireRol('SUPERADMIN', 'ADMIN'), async (req, res, next) => {
+  try {
+    const { nombre, apellido, telefono, sedeId, activo, dni } = req.body;
+
+    // ADMIN solo puede editar usuarios de su propia sede
+    if (req.usuario.rol === 'ADMIN') {
+      const target = await prisma.usuario.findUnique({ where: { id: req.params.id } });
+      if (!target || target.sedeId !== req.usuario.sedeId)
+        return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    const usuario = await prisma.usuario.update({
+      where: { id: req.params.id },
+      data: {
+        ...(nombre   && { nombre }),
+        ...(apellido && { apellido }),
+        ...(telefono !== undefined && { telefono }),
+        ...(sedeId   !== undefined && { sedeId }),
+        ...(activo   !== undefined && { activo }),
+      },
+      select: {
+        id: true, nombre: true, apellido: true, email: true,
+        rol: true, telefono: true, activo: true,
+        sede: { select: { id: true, nombre: true } },
+      },
+    });
+
+    res.json(usuario);
   } catch (err) { next(err); }
 });
 

@@ -3,6 +3,28 @@ const jwt    = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const prisma = require('../utils/prisma');
 
+const detectarDispositivo = (ua) => {
+  if (/Mobile|Android|iPhone|iPad/i.test(ua)) return 'móvil';
+  if (/Tablet/i.test(ua)) return 'tablet';
+  return 'desktop';
+};
+const detectarNavegador = (ua) => {
+  if (ua.includes('Chrome') && !ua.includes('Edg')) return 'Chrome';
+  if (ua.includes('Firefox')) return 'Firefox';
+  if (ua.includes('Safari') && !ua.includes('Chrome')) return 'Safari';
+  if (ua.includes('Edg')) return 'Edge';
+  if (ua.includes('OPR') || ua.includes('Opera')) return 'Opera';
+  return 'Desconocido';
+};
+const detectarOS = (ua) => {
+  if (ua.includes('Windows')) return 'Windows';
+  if (ua.includes('Mac')) return 'macOS';
+  if (ua.includes('Android')) return 'Android';
+  if (ua.includes('iPhone') || ua.includes('iPad')) return 'iOS';
+  if (ua.includes('Linux')) return 'Linux';
+  return 'Desconocido';
+};
+
 // POST /api/auth/login
 const login = async (req, res, next) => {
   try {
@@ -17,11 +39,39 @@ const login = async (req, res, next) => {
       include: { tecnico: true, sede: { select: { id: true, nombre: true, ciudad: true, puedeEnviarStock: true, esPrincipal: true } } },    });
 
     if (!usuario || !usuario.activo) {
+      // Registrar intento fallido
+      await prisma.logActividad.create({
+        data: {
+          usuarioId: usuario?.id || null,
+          accion:    'LOGIN_FALLIDO',
+          detalles:  {
+            email:     email.toLowerCase(),
+            motivo:    !usuario ? 'usuario_no_existe' : 'cuenta_inactiva',
+            navegador: detectarNavegador(req.headers['user-agent'] || ''),
+            sistema:   detectarOS(req.headers['user-agent'] || ''),
+          },
+          ip: req.ip,
+        },
+      });
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
     const passwordOk = await bcrypt.compare(password, usuario.password);
     if (!passwordOk) {
+      // Registrar intento fallido con password incorrecta
+      await prisma.logActividad.create({
+        data: {
+          usuarioId: usuario.id,
+          accion:    'LOGIN_FALLIDO',
+          detalles:  {
+            email:     email.toLowerCase(),
+            motivo:    'password_incorrecta',
+            navegador: detectarNavegador(req.headers['user-agent'] || ''),
+            sistema:   detectarOS(req.headers['user-agent'] || ''),
+          },
+          ip: req.ip,
+        },
+      });
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
@@ -47,13 +97,18 @@ const login = async (req, res, next) => {
         expiresAt,
       },
     });
-
+    const userAgent = req.headers['user-agent'] || 'desconocido';
     await prisma.logActividad.create({
       data: {
         usuarioId: usuario.id,
         accion:    'LOGIN',
-        detalles:  { dispositivo },
-        ip:        req.ip,
+        detalles:  {
+          dispositivo:  dispositivo || detectarDispositivo(userAgent),
+          navegador:    detectarNavegador(userAgent),
+          sistema:      detectarOS(userAgent),
+          userAgent:    userAgent.slice(0, 200), // limitar longitud
+        },
+        ip: req.ip,
       },
     });
 
@@ -114,8 +169,8 @@ const cambiarPassword = async (req, res, next) => {
     const { passwordActual, passwordNueva } = req.body;
     if (!passwordActual || !passwordNueva)
       return res.status(400).json({ error: 'Faltan campos' });
-    if (passwordNueva.length < 6)
-      return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+    if (passwordNueva.length < 8)
+      return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 8 caracteres' });
 
     const usuario = await prisma.usuario.findUnique({ where: { id: req.usuario.id } });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });

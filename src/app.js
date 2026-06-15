@@ -5,6 +5,7 @@ const helmet    = require('helmet');
 const morgan    = require('morgan');
 const path      = require('path');
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 require('dotenv').config();
 
 const app = express();
@@ -55,15 +56,14 @@ app.use('/api', limitadorGlobal);
 
 // ─── Rate limiting estricto para login (anti fuerza bruta) ────
 const limitadorLogin = rateLimit({
-  windowMs: 15 * 60 * 1000,  // 15 minutos
-  max:      10,               // solo 10 intentos de login
+  windowMs: 15 * 60 * 1000,
+  max:      10,
   standardHeaders: true,
   legacyHeaders:   false,
   message: { error: 'Demasiados intentos de login. Espera 15 minutos.' },
   keyGenerator: (req) => {
-    // Bloquear por IP + email para más precisión
     const email = req.body?.email || '';
-    return `${req.ip}_${email.toLowerCase()}`;
+    return `${ipKeyGenerator(req)}_${email.toLowerCase()}`;
   },
 });
 app.use('/api/auth/login', limitadorLogin);
@@ -120,6 +120,7 @@ app.use('/api/stock',           require('./routes/stock.routes'));
 app.use('/api/onus',            require('./routes/onus.routes'));
 app.use('/api/activos',         require('./routes/activos.routes'));
 app.use('/api/tipos-orden',     require('./routes/tiposOrden.routes'));
+app.use('/api/logs',            require('./routes/logs.routes'));
 
 // ─── Health check ──────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
