@@ -26,28 +26,20 @@ const calcularEstado = (ordenes) => {
   return 'ACTIVO';
 };
 
-// ── Helper: resuelve el sedeId según el rol del usuario ──────────────
-// ADMIN de sede  → usa su propia sede (req.usuario.sedeId)
-// NOC/SUPERADMIN → prefiere el query/body param, luego el del usuario
-const resolverSedeId = (req) => {
-  if (req.usuario.rol === 'ADMIN') return req.usuario.sedeId || null;
-  return req.query.sedeId || req.body?.sedeId || req.usuario.sedeId || null;
-};
-
 
 // ── GET /api/contratos ────────────────────────────────────────
 const listar = async (req, res, next) => {
   try {
-    const { search, estado, soloInternet, tipoServicio, page = 1, limit = 20 } = req.query;
-    const where = {};
+    const { search, sedeId, estado, soloInternet, tipoServicio, page = 1, limit = 20 } = req.query;
+    const where    = {};
     const esSoloInternet = soloInternet === 'true';
 
-    // Scope por rol — solo filtra si hay un sedeId real
-    const sedeId = resolverSedeId(req);
-    if (sedeId) {
+    // Scope por rol
+    if (['ADMIN','SECRETARIA'].includes(req.usuario.rol)) {
+      where.sedeId = req.usuario.sedeId;
+    } else if (sedeId) {
       where.sedeId = sedeId;
     }
-    // Si sedeId es null (NOC/SUPERADMIN sin filtro), trae contratos de todas las sedes
 
     // Búsqueda backend
     if (search && search.trim()) {
@@ -61,8 +53,10 @@ const listar = async (req, res, next) => {
       ];
     }
 
+
     // Filtro por tipo de servicio del contrato (INTERNET / CABLE / DUO)
     if (tipoServicio) {
+      // Acepta valor único ('INTERNET') o múltiples separados por coma ('INTERNET,DUO')
       const tipos = tipoServicio.split(',').filter(t => ['INTERNET', 'CABLE', 'DUO'].includes(t));
       if (tipos.length === 1) {
         where.tipoServicio = tipos[0];
@@ -81,7 +75,7 @@ const listar = async (req, res, next) => {
       where,
       include: {
         sede:    { select: { id: true, nombre: true } },
-        plan:    { select: { nombre: true, mbps: true } },
+         plan:    { select: { nombre: true, mbps: true } },
         ordenes: {
           where:   esSoloInternet ? { tipoOrden: { in: TIPOS_INTERNET } } : undefined,
           orderBy: { fechaServicio: 'desc' },
@@ -107,8 +101,8 @@ const listar = async (req, res, next) => {
         cantidadOrdenes: c.ordenes.length,
         ultimaActividad: ultima?.fechaServicio || null,
         ultimoTipoOrden: ultima?.tipoOrden     || null,
-        mbps:            c.mbps       || null,
-        planNombre:      c.plan?.nombre || null,
+        mbps:            c.mbps    || null,        // NUEVO
+         planNombre:      c.plan?.nombre || null,   // NUEVO
         createdAt:       c.createdAt,
       };
     });
@@ -144,21 +138,15 @@ const listar = async (req, res, next) => {
 const obtener = async (req, res, next) => {
   try {
     const esSoloInternet = req.query.soloInternet === 'true';
-    const sedeId = resolverSedeId(req);
-
-    if (!sedeId) {
-      return res.status(400).json({
-        error: 'Se requiere sedeId para consultar el contrato. Pásalo como query param: ?sedeId=...',
-      });
-    }
+    const sedeId = ['ADMIN','SECRETARIA'].includes(req.usuario.rol) ? req.usuario.sedeId : (req.query.sedeId || req.usuario.sedeId);
 
     const contrato = await prisma.contrato.findUnique({
       where: { numero_sedeId: { numero: req.params.numero, sedeId } },
       include: {
         sede: { select: { id: true, nombre: true, ciudad: true } },
-        plan: { select: { nombre: true, mbps: true } },
+        plan:    { select: { nombre: true, mbps: true } }, 
         ordenes: {
-          where:   esSoloInternet ? { tipoOrden: { in: TIPOS_INTERNET } } : undefined,
+          where: esSoloInternet ? { tipoOrden: { in: TIPOS_INTERNET } } : undefined,
           orderBy: { fechaServicio: 'desc' },
           include: {
             tecnico: {
@@ -187,7 +175,7 @@ const obtener = async (req, res, next) => {
     if (!contrato) return res.status(404).json({ error: 'Contrato no encontrado' });
 
     // Scope por rol: ADMIN solo su sede
-    if (req.usuario.rol === 'ADMIN' && contrato.sedeId !== req.usuario.sedeId) {
+    if (['ADMIN','SECRETARIA'].includes(req.usuario.rol) && contrato.sedeId !== req.usuario.sedeId) {
       return res.status(403).json({ error: 'No tienes acceso a este contrato' });
     }
 
@@ -198,6 +186,7 @@ const obtener = async (req, res, next) => {
     const equipoActual = ordenInstal ? {
       instalacionId:    ordenInstal.instalacion.id,
       fechaInstalacion: ordenInstal.instalacion.fechaFin,
+      // OLT donde se autorizó la ONU (puede ser null si no pasó por OLT)
       oltNombre:        ordenInstal.instalacion.configOnu?.olts?.nombre || null,
       serieOnu:         ordenInstal.instalacion.configOnu?.serialNumber
                         || ordenInstal.instalacion.serieOnu
@@ -239,9 +228,10 @@ const obtener = async (req, res, next) => {
       gateway:    contrato.gateway,
       createdAt:  contrato.createdAt,
       updatedAt:  contrato.updatedAt,
-      mbps:       contrato.mbps       || null,
+      mbps:       contrato.mbps    || null,       // ← AGREGAR
       planNombre: contrato.plan?.nombre || null,
-      precinto:   contrato.precinto   || null,
+      precinto: contrato.precinto || null,  // ← AGREGAR
+
       equipoActual,
       ordenes,
     });
@@ -251,16 +241,17 @@ const obtener = async (req, res, next) => {
 // ── GET /api/contratos/mapa ───────────────────────────────────
 const mapa = async (req, res, next) => {
   try {
-    const { estado, servicio } = req.query;
+    const { sedeId, estado, servicio } = req.query;   // servicio: 'internet' | 'cable' | undefined
     const where = {};
 
-    // Scope por rol — solo filtra si hay un sedeId real
-    const sedeId = resolverSedeId(req);
-    if (sedeId) {
+    // Scope por rol: ADMIN solo su sede
+    if (['ADMIN','SECRETARIA'].includes(req.usuario.rol)) {
+      where.sedeId = req.usuario.sedeId;
+    } else if (sedeId) {
       where.sedeId = sedeId;
     }
 
-    // Filtro por tipo de servicio
+    // Filtro por tipo de servicio (a nivel contrato: que tenga al menos una orden de ese tipo)
     if (servicio === 'internet') {
       where.ordenes = { some: { tipoOrden: { in: TIPOS_INTERNET } } };
     } else if (servicio === 'cable') {
@@ -276,38 +267,42 @@ const mapa = async (req, res, next) => {
         ordenes: {
           orderBy: { fechaServicio: 'desc' },
           select: {
-            tipoOrden:     true,
-            estado:        true,
+            tipoOrden: true,
+            estado:    true,
             fechaServicio: true,
+            // ya no necesitás traer instalacion para las coords
           },
         },
       },
     });
 
+    // Para cada contrato, buscar la instalación más reciente CON coordenadas
     const puntos = [];
-    for (const c of contratos) {
-      if (c.latitud == null || c.longitud == null) continue;
+for (const c of contratos) {
+  // ✅ Leer coords del contrato directamente
+  if (c.latitud == null || c.longitud == null) continue;
 
-      const tieneInternet = c.ordenes.some(o => TIPOS_INTERNET.includes(o.tipoOrden));
-      const tieneCable    = c.ordenes.some(o => TIPOS_CABLE.includes(o.tipoOrden));
-      const tieneDuo      = c.ordenes.some(o => TIPOS_DUO.includes(o.tipoOrden));
-      let servicioLabel = 'Cable';
-      if (tieneDuo || (tieneInternet && tieneCable)) servicioLabel = 'Duo';
-      else if (tieneInternet) servicioLabel = 'Internet';
+  const tieneInternet = c.ordenes.some(o => TIPOS_INTERNET.includes(o.tipoOrden));
+  const tieneCable    = c.ordenes.some(o => TIPOS_CABLE.includes(o.tipoOrden));
+  const tieneDuo      = c.ordenes.some(o => TIPOS_DUO.includes(o.tipoOrden));
+  let servicioLabel = 'Cable';
+  if (tieneDuo || (tieneInternet && tieneCable)) servicioLabel = 'Duo';
+  else if (tieneInternet) servicioLabel = 'Internet';
 
-      puntos.push({
-        numero:    c.numero,
-        abonado:   c.abonado,
-        direccion: c.direccion,
-        sector:    c.sector,
-        sede:      c.sede,
-        estado:    calcularEstado(c.ordenes),
-        servicio:  servicioLabel,
-        latitud:   c.latitud,
-        longitud:  c.longitud,
-      });
-    }
+  puntos.push({
+    numero:    c.numero,
+    abonado:   c.abonado,
+    direccion: c.direccion,
+    sector:    c.sector,
+    sede:      c.sede,
+    estado:    calcularEstado(c.ordenes),
+    servicio:  servicioLabel,
+    latitud:   c.latitud,   // ✅ del contrato
+    longitud:  c.longitud,  // ✅ del contrato
+  });
+}
 
+    // Filtro por estado si vino
     const filtrados = estado ? puntos.filter(p => p.estado === estado) : puntos;
 
     res.json({
@@ -321,11 +316,7 @@ const mapa = async (req, res, next) => {
 const guardarWan = async (req, res, next) => {
   try {
     const { ipWan, mascara, gateway } = req.body;
-    const sedeId = resolverSedeId(req);
-
-    if (!sedeId) {
-      return res.status(400).json({ error: 'Se requiere sedeId para actualizar el contrato.' });
-    }
+    const sedeId = ['ADMIN','SECRETARIA'].includes(req.usuario.rol) ? req.usuario.sedeId : (req.query.sedeId || req.usuario.sedeId);
 
     const esIp = (v) => /^(\d{1,3}\.){3}\d{1,3}$/.test(v || '');
     if (!esIp(ipWan))   return res.status(400).json({ error: 'IP WAN inválida' });
@@ -382,15 +373,16 @@ const uploadExcel = multer({
 }).single('excel');
 
 // ── POST /api/contratos/subir-excel ───────────────────────────
+// Lee el Excel y devuelve la previsualización (sin guardar nada).
 const subirExcel = async (req, res, next) => {
   uploadExcel(req, res, async (err) => {
-    if (err)       return res.status(400).json({ error: err.message });
-    if (!req.file) return res.status(400).json({ error: 'No se subió archivo' });
+    if (err)        return res.status(400).json({ error: err.message });
+    if (!req.file)  return res.status(400).json({ error: 'No se subió archivo' });
     try {
       const { contratos, errores } = parsearExcelContratos(req.file.path);
       res.json({
-        archivo:   req.file.filename,
-        total:     contratos.length,
+        archivo: req.file.filename,
+        total:   contratos.length,
         errores,
         contratos,
       });
@@ -402,14 +394,15 @@ const subirExcel = async (req, res, next) => {
 };
 
 // ── POST /api/contratos/confirmar-excel ───────────────────────
+// Crea los contratos en la sede del usuario. Los que ya existen se actualizan.
 const confirmarExcel = async (req, res, next) => {
   try {
     const { contratos } = req.body;
     if (!Array.isArray(contratos) || contratos.length === 0)
       return res.status(400).json({ error: 'No hay contratos para importar' });
 
-    // ADMIN importa a su sede. SUPERADMIN/NOC deben mandar sedeId en el body.
-    const sedeId = req.usuario.rol === 'ADMIN'
+    // El ADMIN importa a su sede. SUPERADMIN/NOC deben mandar sedeId.
+    const sedeId = ['ADMIN','SECRETARIA'].includes(req.usuario.rol)
       ? req.usuario.sedeId
       : req.body.sedeId;
 
@@ -428,20 +421,18 @@ const confirmarExcel = async (req, res, next) => {
           continue;
         }
 
-        const existe = await prisma.contrato.findUnique({
-          where: { numero_sedeId: { numero: c.numero, sedeId } },
-        });
+        const existe = await prisma.contrato.findUnique({ where: { numero_sedeId: { numero: c.numero, sedeId } } });
 
         await prisma.contrato.upsert({
           where:  { numero_sedeId: { numero: c.numero, sedeId } },
           create: {
             numero:       c.numero,
             abonado:      c.abonado,
-            dni:          c.dni          || null,
-            celular:      c.celular      || null,
+            dni:          c.dni        || null,
+            celular:      c.celular    || null,
             direccion:    c.direccion,
-            referencia:   c.referencia   || null,
-            sector:       c.sector       || null,
+            referencia:   c.referencia || null,
+            sector:       c.sector     || null,
             tipoServicio: c.tipoServicio || null,
             sedeId,
           },
@@ -479,6 +470,7 @@ const confirmarExcel = async (req, res, next) => {
 
 
 // ── PATCH /api/contratos/:numero/ubicacion ───────────────────
+// Permite al técnico (o admin) actualizar la ubicación GPS del contrato
 const actualizarUbicacion = async (req, res, next) => {
   try {
     const { latitud, longitud } = req.body;
@@ -490,10 +482,7 @@ const actualizarUbicacion = async (req, res, next) => {
     if (isNaN(lat) || isNaN(lng))
       return res.status(400).json({ error: 'Coordenadas inválidas' });
 
-    const sedeId = resolverSedeId(req);
-    if (!sedeId) {
-      return res.status(400).json({ error: 'Se requiere sedeId para actualizar el contrato.' });
-    }
+    const sedeId = ['ADMIN','SECRETARIA'].includes(req.usuario.rol) ? req.usuario.sedeId : (req.query.sedeId || req.usuario.sedeId);
 
     const contrato = await prisma.contrato.findUnique({
       where: { numero_sedeId: { numero: req.params.numero, sedeId } },
@@ -516,11 +505,7 @@ const actualizarUbicacion = async (req, res, next) => {
       },
     });
 
-    res.json({
-      numero:   actualizado.numero,
-      latitud:  actualizado.latitud,
-      longitud: actualizado.longitud,
-    });
+    res.json({ numero: actualizado.numero, latitud: actualizado.latitud, longitud: actualizado.longitud });
   } catch (err) { next(err); }
 };
 
@@ -532,10 +517,7 @@ const actualizarPrecinto = async (req, res, next) => {
     if (precinto === undefined)
       return res.status(400).json({ error: 'precinto es requerido' });
 
-    const sedeId = resolverSedeId(req);
-    if (!sedeId) {
-      return res.status(400).json({ error: 'Se requiere sedeId para actualizar el contrato.' });
-    }
+    const sedeId = ['ADMIN','SECRETARIA'].includes(req.usuario.rol) ? req.usuario.sedeId : (req.query.sedeId || req.usuario.sedeId);
 
     const contrato = await prisma.contrato.findUnique({
       where: { numero_sedeId: { numero: req.params.numero, sedeId } },
@@ -553,11 +535,4 @@ const actualizarPrecinto = async (req, res, next) => {
 
 module.exports = {
   actualizarUbicacion,
-  actualizarPrecinto,
-  listar,
-  obtener,
-  mapa,
-  guardarWan,
-  subirExcel,
-  confirmarExcel,
-};
+  actualizarPrecinto, listar, obtener, mapa, guardarWan, subirExcel, confirmarExcel };

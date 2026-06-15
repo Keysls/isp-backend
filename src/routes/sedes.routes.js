@@ -6,7 +6,7 @@ router.use(authMiddleware);
 
 // SUPERADMIN crea y gestiona sedes
 // ADMIN puede ver su propia sede
-router.get('/',    requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.listar);
+router.get('/',    requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC', 'SECRETARIA'), ctrl.listar);
 router.get('/:id', requireRol('SUPERADMIN', 'ADMIN'), ctrl.obtener);
 router.post('/',   requireRol('SUPERADMIN'),           ctrl.crear);
 router.put('/:id', requireRol('SUPERADMIN'),           ctrl.actualizar);

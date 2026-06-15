@@ -28,7 +28,7 @@ const decrementProductoTotal = async (tx, { productoId, cantidad }) => {
 };
 
 const getSedeId = (req) => {
-  if (req.usuario?.rol === 'ADMIN') return req.usuario.sedeId;
+  if (['ADMIN','SECRETARIA'].includes(req.usuario?.rol)) return req.usuario.sedeId;
   return req.query.sede_id || req.query.sedeId || req.body?.sede_id || req.body?.sedeId || req.usuario?.sedeId;
 };
 
@@ -673,7 +673,7 @@ const statsControlador = async (req, res, next) => {
 
 const auditoriaControlador = async (req, res, next) => {
   try {
-    const sedeId = req.query.sedeId || req.query.sede_id || (req.usuario?.rol === 'ADMIN' ? req.usuario.sedeId : null);
+    const sedeId = req.query.sedeId || req.query.sede_id || (['ADMIN','SECRETARIA'].includes(req.usuario?.rol) ? req.usuario.sedeId : null);
     // sedeId es opcional para SUPERADMIN/NOC — sin él ve todos los movimientos
 
     const [entregas, consumos, salidas, entradas, envios] = await Promise.all([

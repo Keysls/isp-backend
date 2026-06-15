@@ -15,7 +15,7 @@ const listar = async (req, res, next) => {
       ...(zona && { zonaAsignada: { contains: zona, mode: 'insensitive' } }),
     };
 
-    if (req.usuario.rol === 'ADMIN') {
+    if (['ADMIN','SECRETARIA'].includes(req.usuario.rol)) {
       // Admin solo ve técnicos de su sede
       where.usuario = { sedeId: req.usuario.sedeId };
     } else if (sedeId) {
@@ -69,7 +69,7 @@ const obtener = async (req, res, next) => {
     if (!tecnico) return res.status(404).json({ error: 'Técnico no encontrado' });
 
     // ADMIN no puede ver técnicos de otra sede
-    if (req.usuario.rol === 'ADMIN' && tecnico.usuario.sede?.id !== req.usuario.sedeId)
+    if (['ADMIN','SECRETARIA'].includes(req.usuario.rol) && tecnico.usuario.sede?.id !== req.usuario.sedeId)
       return res.status(403).json({ error: 'No tienes acceso a este técnico' });
 
     res.json(tecnico);
@@ -90,7 +90,7 @@ const crear = async (req, res, next) => {
 
     // Determinar sede
     let sedeId;
-    if (req.usuario.rol === 'ADMIN') {
+    if (['ADMIN','SECRETARIA'].includes(req.usuario.rol)) {
       sedeId = req.usuario.sedeId;
     } else {
       // SUPERADMIN debe indicar la sede
@@ -165,7 +165,7 @@ const actualizar = async (req, res, next) => {
     if (!tecnico) return res.status(404).json({ error: 'Técnico no encontrado' });
 
     // ADMIN no puede modificar técnicos de otra sede
-    if (req.usuario.rol === 'ADMIN' && tecnico.usuario.sedeId !== req.usuario.sedeId)
+    if (['ADMIN','SECRETARIA'].includes(req.usuario.rol) && tecnico.usuario.sedeId !== req.usuario.sedeId)
       return res.status(403).json({ error: 'No tienes acceso a este técnico' });
 
     const resultado = await prisma.$transaction(async (tx) => {
@@ -245,7 +245,7 @@ const resetPassword = async (req, res, next) => {
     if (!tecnico) return res.status(404).json({ error: 'Técnico no encontrado' });
 
     // ADMIN solo puede tocar técnicos de su sede
-    if (req.usuario.rol === 'ADMIN' && tecnico.usuario.sedeId !== req.usuario.sedeId)
+    if (['ADMIN','SECRETARIA'].includes(req.usuario.rol) && tecnico.usuario.sedeId !== req.usuario.sedeId)
       return res.status(403).json({ error: 'No tienes acceso a este técnico' });
 
     const hash = await bcrypt.hash(password, 12);

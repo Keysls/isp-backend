@@ -6,7 +6,7 @@ const { authMiddleware, requireRol } = require('../middleware/auth.middleware');
 router.use(authMiddleware);
 
 // Todos los roles del panel pueden gestionar puntos de red
-const rolesPanel = requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC');
+const rolesPanel = requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC', 'SECRETARIA');
 
 // Multer en memoria — el KML es chico, no hace falta guardarlo a disco
 const upload = multer({
