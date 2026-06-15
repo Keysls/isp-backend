@@ -50,8 +50,12 @@ model Usuario {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   sedeId       String?
+  // ── 2FA ──────────────────────────────────────────────────
+  totpSecret   String?       // Secret TOTP cifrado (null = 2FA no activado)
+  totpActivo   Boolean       @default(false)
   tecnico      Tecnico?
   tokensSesion TokenSesion[]
+  LogActividad LogActividad[]
   sede         Sede?         @relation(fields: [sedeId], references: [id])
 
   @@map("usuarios")
@@ -81,15 +85,17 @@ model Tecnico {
 }
 
 model TokenSesion {
-  id          String    @id @default(uuid())
-  usuarioId   String
-  token       String    @unique
-  dispositivo String?
-  activo      Boolean   @default(true)
-  expiresAt   DateTime
-  createdAt   DateTime  @default(now())
-  fechaCierre DateTime?
-  usuario     Usuario   @relation(fields: [usuarioId], references: [id])
+  id           String    @id @default(uuid())
+  usuarioId    String
+  token        String    @unique   // access token (JWT corto)
+  refreshToken String?   @unique   // refresh token (largo, opaco)
+  dispositivo  String?
+  activo       Boolean   @default(true)
+  expiresAt    DateTime             // expiry del access token
+  refreshExpiresAt DateTime?        // expiry del refresh token
+  createdAt    DateTime  @default(now())
+  fechaCierre  DateTime?
+  usuario      Usuario   @relation(fields: [usuarioId], references: [id])
 
   @@map("tokens_sesion")
 }
@@ -608,6 +614,7 @@ model LogActividad {
   detalles   Json?
   ip         String?
   createdAt  DateTime @default(now())
+  usuario    Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
 
   @@map("log_actividad")
 }

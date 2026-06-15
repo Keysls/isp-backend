@@ -17,6 +17,6 @@ router.get('/pendientes-olt',                      requireRol('SUPERADMIN', 'OPE
 router.post('/:instalacionId/autorizar-olt',       requireRol('SUPERADMIN', 'OPERADOR_NOC'),    ctrl.autorizarManual);
 
 // ── Ver detalle ───────────────────────────────────────────────
-router.get('/:instalacionId',                      ctrl.obtener);
+router.get('/:instalacionId', requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN', 'SECRETARIA', 'TECNICO'), ctrl.obtener);
 
 module.exports = router;

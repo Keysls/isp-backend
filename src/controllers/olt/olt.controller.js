@@ -1,7 +1,7 @@
 // src/controllers/olt/olt.controller.js
 
 const prisma  = require('../../utils/prisma');
-const { encrypt, decrypt } = require('./encryption');
+const { encrypt, decrypt, migrarSiLegacy } = require('./encryption');
 const { testConexionOlt }  = require('./ssh.service');
 const { buildComandosAutorizacion, parsearPuerto } = require('./zte.commands');
 const { runComandos } = require('./ssh.service');
@@ -190,15 +190,29 @@ const test = async (req, res, next) => {
     });
     if (!olt) return res.status(404).json({ error: 'OLT no encontrada' });
 
-    const oltConPassword = { ...olt, password: decrypt(olt.passwordHash) };
-    const resultado = await testConexionOlt(oltConPassword);
+    // Descifrar contraseña solo para uso interno — NUNCA enviar al frontend
+    const password = decrypt(olt.passwordHash);
+    const oltParaTest = { ...olt, password };
+    const resultado = await testConexionOlt(oltParaTest);
+
+    // Migrar hash legacy al nuevo formato con IV aleatorio
+    const hashMigrado = migrarSiLegacy(olt.passwordHash);
 
     await prisma.olt.update({
       where: { id: olt.id },
-      data:  { estado: resultado.estado, ultimaRevision: new Date() },
+      data:  {
+        estado:         resultado.estado,
+        ultimaRevision: new Date(),
+        // Actualizar hash al nuevo formato si era legacy
+        ...(hashMigrado !== olt.passwordHash && { passwordHash: hashMigrado }),
+      },
     });
 
-    res.json(resultado);
+    // Solo devolver estado y resultados — SIN contraseña
+    res.json({
+      estado:     resultado.estado,
+      resultados: resultado.resultados,
+    });
   } catch (err) { next(err); }
 };
 

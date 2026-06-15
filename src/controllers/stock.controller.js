@@ -118,6 +118,17 @@ const entradaStock = async (req, res, next) => {
     });
 
     res.json({ ok: true, message: 'Entrada registrada correctamente' });
+
+    // Log de auditoría (fuera de la transacción para no bloquearla)
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario?.id || null,
+        accion:     'ENTRADA_STOCK',
+        tabla:      'entradas_stock',
+        detalles:   { sedeId, items: items.map(i => ({ productoId: i.producto_id ?? i.productoId, cantidad: i.cantidad })), comentario: req.body.comentario || null },
+        ip:         req.ip,
+      },
+    }).catch(() => {}); // no fallar si el log falla
   } catch (err) {
     console.error('ERROR entradaStock:', err.message);
     next(err);
@@ -180,6 +191,16 @@ const salidaStock = async (req, res, next) => {
     } catch (_) {}
 
     res.json({ ok: true, message: 'Salida registrada correctamente' });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId: req.usuario?.id || null,
+        accion:    'SALIDA_STOCK_TECNICO',
+        tabla:     'entregas_tecnico',
+        detalles:  { sedeId, tecnicoId, productoId, cantidad },
+        ip:        req.ip,
+      },
+    }).catch(() => {});
   } catch (err) { next(err); }
 };
 
@@ -427,6 +448,16 @@ const enviarProductosSede = async (req, res, next) => {
     }
 
     res.json({ ok: true, message: 'Envio registrado correctamente' });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId: req.usuario?.id || null,
+        accion:    'ENVIO_STOCK_SEDE',
+        tabla:     'envios',
+        detalles:  { sedeOrigenId, sedeDestinoId, guia, items: items.map(i => ({ productoId: i.producto_id ?? i.productoId, cantidad: i.cantidad })) },
+        ip:        req.ip,
+      },
+    }).catch(() => {});
   } catch (err) { next(err); }
 };
 

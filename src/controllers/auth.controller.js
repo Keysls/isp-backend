@@ -75,10 +75,37 @@ const login = async (req, res, next) => {
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
+    // ── Verificar 2FA si está activado ────────────────────────
+    if (usuario.totpActivo) {
+      const { totpCodigo } = req.body;
+      if (!totpCodigo) {
+        return res.status(200).json({ requiere2FA: true });
+      }
+      const { verificarCodigo, descifrarSecret } = require('./totp.controller');
+      const secret = descifrarSecret(usuario.totpSecret);
+      const valido = verificarCodigo(secret, totpCodigo);
+      if (!valido) {
+        await prisma.logActividad.create({
+          data: {
+            usuarioId: usuario.id,
+            accion:    'LOGIN_FALLIDO_2FA',
+            detalles:  { email: email.toLowerCase(), motivo: 'codigo_2fa_incorrecto' },
+            ip:        req.ip,
+          },
+        });
+        return res.status(401).json({ error: 'Código 2FA incorrecto' });
+      }
+    }
+
     // Payload del JWT incluye rol y sedeId para validaciones rápidas
-    const payload   = { id: usuario.id, rol: usuario.rol, sedeId: usuario.sedeId };
-    const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
-    const token     = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+    const payload    = { id: usuario.id, rol: usuario.rol, sedeId: usuario.sedeId };
+    const expiresIn  = process.env.JWT_EXPIRES_IN || '7d';
+    const token      = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+
+    // Refresh token opaco — 30 días
+    const { randomBytes } = require('crypto');
+    const refreshToken    = randomBytes(64).toString('hex');
+    const REFRESH_DAYS    = 30;
 
     const parseExpiry = (str) => {
       const match = str.match(/^(\d+)([dhm])$/);
@@ -87,14 +114,17 @@ const login = async (req, res, next) => {
       const ms = { d: 86400000, h: 3600000, m: 60000 };
       return Number(n) * ms[unit];
     };
-    const expiresAt = new Date(Date.now() + parseExpiry(expiresIn));
+    const expiresAt        = new Date(Date.now() + parseExpiry(expiresIn));
+    const refreshExpiresAt = new Date(Date.now() + REFRESH_DAYS * 86400000);
 
     await prisma.tokenSesion.create({
       data: {
-        usuarioId:   usuario.id,
+        usuarioId:       usuario.id,
         token,
-        dispositivo: dispositivo || 'desconocido',
+        refreshToken,
+        dispositivo:     dispositivo || 'desconocido',
         expiresAt,
+        refreshExpiresAt,
       },
     });
     const userAgent = req.headers['user-agent'] || 'desconocido';
@@ -116,6 +146,7 @@ const login = async (req, res, next) => {
 
     res.json({
       token,
+      refreshToken,
       usuario: usuarioSinPassword,
     });
   } catch (err) {
@@ -187,5 +218,42 @@ const cambiarPassword = async (req, res, next) => {
 };
 
 
+// POST /api/auth/refresh — renueva el access token con el refresh token
+const refresh = async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) return res.status(400).json({ error: 'Refresh token requerido' });
+
+    const sesion = await prisma.tokenSesion.findUnique({
+      where:   { refreshToken },
+      include: { usuario: { include: { sede: true } } },
+    });
+
+    if (!sesion || !sesion.activo)
+      return res.status(401).json({ error: 'Refresh token inválido' });
+
+    if (sesion.refreshExpiresAt && sesion.refreshExpiresAt < new Date())
+      return res.status(401).json({ error: 'Refresh token expirado' });
+
+    if (!sesion.usuario.activo)
+      return res.status(401).json({ error: 'Usuario desactivado' });
+
+    // Emitir nuevo access token
+    const payload   = { id: sesion.usuario.id, rol: sesion.usuario.rol, sedeId: sesion.usuario.sedeId };
+    const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
+    const nuevoToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+    const expiresAt  = new Date(Date.now() + 7 * 86400000);
+
+    // Actualizar el access token en BD (el refresh token no cambia)
+    await prisma.tokenSesion.update({
+      where: { id: sesion.id },
+      data:  { token: nuevoToken, expiresAt },
+    });
+
+    res.json({ token: nuevoToken });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
-  cambiarPassword, login, logout, me };
+  cambiarPassword, login, logout, me, refresh,
+};

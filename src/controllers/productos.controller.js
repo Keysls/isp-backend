@@ -161,6 +161,17 @@ const crearProducto = async (req, res, next) => {
       },
     });
 
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario.id,
+        accion:     'CREAR_PRODUCTO',
+        tabla:      'productos',
+        registroId: String(producto.id),
+        detalles:   { nombre: producto.nombre, categoria: producto.categoria, codigo: producto.codigo },
+        ip:         req.ip,
+      },
+    });
+
     res.status(201).json(mapProducto(producto));
   } catch (err) { next(err); }
 };
@@ -184,6 +195,17 @@ const actualizarProducto = async (req, res, next) => {
       },
     });
 
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario.id,
+        accion:     'ACTUALIZAR_PRODUCTO',
+        tabla:      'productos',
+        registroId: String(producto.id),
+        detalles:   { nombre: producto.nombre, cambios: req.body },
+        ip:         req.ip,
+      },
+    });
+
     res.json(mapProducto(producto));
   } catch (err) { next(err); }
 };
@@ -193,6 +215,17 @@ const eliminarProducto = async (req, res, next) => {
     const producto = await prisma.producto.update({
       where: { id: Number(req.params.id) },
       data: { estado: false },
+    });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario.id,
+        accion:     'DESACTIVAR_PRODUCTO',
+        tabla:      'productos',
+        registroId: String(producto.id),
+        detalles:   { nombre: producto.nombre },
+        ip:         req.ip,
+      },
     });
 
     res.json({

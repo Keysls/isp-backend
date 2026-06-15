@@ -42,6 +42,18 @@ const crear = async (req, res) => {
         tipoServicio,
       },
     });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario.id,
+        accion:     'CREAR_PLAN',
+        tabla:      'planes_internet',
+        registroId: plan.id,
+        detalles:   { nombre: plan.nombre, mbps: plan.mbps, precio: plan.precio, sedeId },
+        ip:         req.ip,
+      },
+    });
+
     res.status(201).json(plan);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -72,6 +84,18 @@ const actualizar = async (req, res) => {
         ...(tipoServicio != null && { tipoServicio }),
       },
     });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario.id,
+        accion:     'ACTUALIZAR_PLAN',
+        tabla:      'planes_internet',
+        registroId: id,
+        detalles:   { nombre: actualizado.nombre, cambios: req.body },
+        ip:         req.ip,
+      },
+    });
+
     res.json(actualizado);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -90,6 +114,18 @@ const eliminar = async (req, res) => {
 
     // Soft-delete para no romper órdenes históricas
     await prisma.planInternet.update({ where: { id }, data: { activo: false } });
+
+    await prisma.logActividad.create({
+      data: {
+        usuarioId:  req.usuario.id,
+        accion:     'ELIMINAR_PLAN',
+        tabla:      'planes_internet',
+        registroId: id,
+        detalles:   { nombre: plan.nombre, mbps: plan.mbps, precio: plan.precio },
+        ip:         req.ip,
+      },
+    });
+
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
