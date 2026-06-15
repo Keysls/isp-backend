@@ -26,7 +26,8 @@ router.patch('/perfil', async (req, res, next) => {
       },
       select: {
         id: true, nombre: true, apellido: true, email: true,
-        rol: true, telefono: true, activo: true,
+        rol: true, telefono: true, activo: true, createdAt: true,
+        totpActivo: true,
         sede: { select: { id: true, nombre: true, ciudad: true } },
       },
     });
@@ -64,6 +65,7 @@ router.get('/', requireRol('SUPERADMIN', 'ADMIN'), async (req, res, next) => {
       select: {
         id: true, nombre: true, apellido: true, email: true,
         rol: true, telefono: true, activo: true, createdAt: true,
+        totpActivo: true,
         sede: { select: { id: true, nombre: true, ciudad: true } },
       },
       orderBy: { nombre: 'asc' },
