@@ -112,7 +112,7 @@ app.use((req, res, next) => {
 
 // ─── Rutas ─────────────────────────────────────────────────────
 app.use('/api/auth',            require('./routes/auth.routes'));
-// app.use('/api/auth/2fa',     require('./routes/totp.routes')); // activar después de copiar totp.controller.js y totp.routes.js
+app.use('/api/auth/2fa',        require('./routes/totp.routes'));
 app.use('/api/usuarios',        require('./routes/usuarios.routes'));
 app.use('/api/sedes',           require('./routes/sedes.routes'));
 app.use('/api/tecnicos',        require('./routes/tecnicos.routes'));

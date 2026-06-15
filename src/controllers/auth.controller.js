@@ -287,7 +287,7 @@ const solicitarReset = async (req, res, next) => {
 
     const { randomBytes } = require('crypto');
     const token     = randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutos
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutos
 
     await prisma.passwordResetToken.create({
       data: { usuarioId: usuario.id, token, expiresAt },
