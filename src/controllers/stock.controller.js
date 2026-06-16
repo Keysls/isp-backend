@@ -676,6 +676,10 @@ const auditoriaControlador = async (req, res, next) => {
     const sedeId = req.query.sedeId || req.query.sede_id || (['ADMIN','SECRETARIA'].includes(req.usuario?.rol) ? req.usuario.sedeId : null);
     // sedeId es opcional para SUPERADMIN/NOC — sin él ve todos los movimientos
 
+    // Cargar sedes para resolver nombres desde sedeId
+    const todasSedes = await prisma.sede.findMany({ select: { id: true, nombre: true } });
+    const sedeNombre = (id) => todasSedes.find(s => s.id === id)?.nombre || null;
+
     const [entregas, consumos, salidas, entradas, envios] = await Promise.all([
       prisma.entregaTecnico.findMany({
         where: {
@@ -705,7 +709,7 @@ const auditoriaControlador = async (req, res, next) => {
       prisma.salidaDirecta.findMany({
         where: { ...(sedeId && { sedeId }) },
         select: {
-          id: true, fecha: true, cantidad: true, comentario: true,
+          id: true, fecha: true, cantidad: true, comentario: true, sedeId: true,
           producto: { select: { nombre: true } },
         },
         orderBy: { fecha: 'desc' },
@@ -714,7 +718,7 @@ const auditoriaControlador = async (req, res, next) => {
       prisma.entradaStock.findMany({
         where: { ...(sedeId && { sedeId }) },
         select: {
-          id: true, fecha: true, cantidad: true, comentario: true,
+          id: true, fecha: true, cantidad: true, comentario: true, sedeId: true,
           producto: { select: { nombre: true } },
         },
         orderBy: { fecha: 'desc' },
@@ -790,12 +794,12 @@ const auditoriaControlador = async (req, res, next) => {
       }))),
 
 
-      ...salidas.map(s => ({ id: s.id, fecha: s.fecha, tipo: 'salida_directa', item: s.producto.nombre, cantidad: s.cantidad, comentario: s.comentario })),
-      ...entradas.map(e => ({ id: e.id, fecha: e.fecha, tipo: 'entrada', item: e.producto.nombre, cantidad: e.cantidad, comentario: e.comentario })),
+      ...salidas.map(s => ({ id: s.id, fecha: s.fecha, tipo: 'salida_directa', item: s.producto.nombre, cantidad: s.cantidad, comentario: s.comentario, sede_nombre: sedeNombre(s.sedeId), sedeId: s.sedeId || null })),
+      ...entradas.map(e => ({ id: e.id, fecha: e.fecha, tipo: 'entrada', item: e.producto.nombre, cantidad: e.cantidad, comentario: e.comentario, sede_nombre: sedeNombre(e.sedeId), sedeId: e.sedeId || null })),
       ...envios.flatMap(e => e.detalles.map(d => ({
         id: e.id,
         fecha: e.fechaEnvio,
-        tipo: e.sedeOrigenId === sedeId ? 'envio_salida' : 'envio_entrada',
+        tipo: sedeId ? (e.sedeOrigenId === sedeId ? 'envio_salida' : 'envio_entrada') : 'envio_salida',
         estado: e.estado,
         motivo_cancelacion: e.motivoCancelacion,
         item: d.producto.nombre,
@@ -892,7 +896,7 @@ const inventarioTecnico = async (req, res, next) => {
           nServicio,
           abonado,
           contrato,
-          codigoPon:   c.codigoPon || null,
+          codigoPon:   c.codigoPon || null,  // ← agregar esto también
         };
       })
     );
@@ -937,7 +941,7 @@ const inventarioTecnico = async (req, res, next) => {
       ...consumosEnriquecidos.map(c => ({
         tipo: 'consumo', item: c.nombre, cantidad: c.cantidad, fecha: c.fecha,
         nServicio: c.nServicio, abonado: c.abonado, contrato: c.contrato,
-        codigoPon: c.codigoPon,
+        codigoPon: c.codigoPon,  // ← ESTA LÍNEA
       })),
       ...recojosEnriquecidos.map(r => ({
         tipo: 'envio_salida', item: r.nombreProducto || r.tipoEquipo, cantidad: 1, fecha: r.fecha,
