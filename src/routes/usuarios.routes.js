@@ -158,7 +158,7 @@ router.get('/secretarios', requireRol('ADMIN'), async (req, res, next) => {
       where: { sedeId: req.usuario.sedeId, rol: 'SECRETARIA' },
       select: {
         id: true, nombre: true, apellido: true, email: true,
-        telefono: true, activo: true, createdAt: true,
+        telefono: true, activo: true, createdAt: true, totpActivo: true,
       },
       orderBy: { nombre: 'asc' },
     });
