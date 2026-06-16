@@ -892,6 +892,7 @@ const inventarioTecnico = async (req, res, next) => {
           nServicio,
           abonado,
           contrato,
+          codigoPon:   c.codigoPon || null,
         };
       })
     );
@@ -935,7 +936,8 @@ const inventarioTecnico = async (req, res, next) => {
       })),
       ...consumosEnriquecidos.map(c => ({
         tipo: 'consumo', item: c.nombre, cantidad: c.cantidad, fecha: c.fecha,
-        nServicio: c.nServicio, abonado: c.abonado,
+        nServicio: c.nServicio, abonado: c.abonado, contrato: c.contrato,
+        codigoPon: c.codigoPon,
       })),
       ...recojosEnriquecidos.map(r => ({
         tipo: 'envio_salida', item: r.nombreProducto || r.tipoEquipo, cantidad: 1, fecha: r.fecha,
