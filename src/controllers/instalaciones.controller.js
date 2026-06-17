@@ -368,6 +368,8 @@ const completar = async (req, res, next) => {
     });
 
     // ── Autorización automática en OLT en segundo plano ───────
+    // Si ya fue autorizada manualmente desde Paso 4 de la app, no relanzar
+    const yaAutorizada = instalacion.configOnu?.estadoOlt === 'AUTORIZADA';
     const serialNumber = instalacion.configOnu?.serialNumber;
     const sedeId       = instalacion.orden.sedeId;
     const abonado      = instalacion.orden.abonado;
@@ -377,7 +379,9 @@ const completar = async (req, res, next) => {
 
     //const esInternet   = instalacion.orden.tipoOrden?.includes('_I');
 
-    if (serialNumber && sedeId && esInternet) {
+    if (yaAutorizada) {
+      console.log(`[COMPLETAR] ONU ya autorizada manualmente — omitiendo autorización automática`);
+    } else if (serialNumber && sedeId && esInternet) {
       setImmediate(async () => {
         try {
           const r = await autorizarConReintentos({
@@ -416,7 +420,7 @@ const obtener = async (req, res, next) => {
       where:   { id: req.params.instalacionId },
       include: {
         orden:     true,
-        configOnu: true,
+        configOnu: { include: { olts: { select: { nombre: true } } } },
         fotos:     { orderBy: { createdAt: 'asc' } },
       },
     });
@@ -470,13 +474,27 @@ const autorizarManual = async (req, res, next) => {
 
     const instalacion = await prisma.instalacion.findUnique({
       where:   { id: req.params.instalacionId },
-      include: { configOnu: true, orden: { include: { sede: true } } },
+      include: {
+        configOnu: true,
+        orden: { include: { sede: true, tecnico: true } },
+      },
     });
 
     if (!instalacion)
       return res.status(404).json({ error: 'Instalación no encontrada' });
+
+    // Si quien llama es TECNICO, solo puede autorizar su propia instalación
+    if (req.usuario.rol === 'TECNICO' && instalacion.orden.tecnico?.usuarioId !== req.usuario.id) {
+      return res.status(403).json({ error: 'No eres el técnico asignado a esta orden' });
+    }
+
     if (!instalacion.configOnu)
       return res.status(422).json({ error: 'La instalación no tiene configuración de ONU' });
+
+    // omitirOlt es una decisión exclusiva del NOC (marca activa sin pasar por OLT)
+    if (omitirOlt === true && req.usuario.rol === 'TECNICO') {
+      return res.status(403).json({ error: 'Solo el NOC puede marcar una ONU como activa sin autorizar en la OLT' });
+    }
 
     // ═══════════════════════════════════════════════════════════
     // CASO 1: Marcar como activa SIN tocar OLT
