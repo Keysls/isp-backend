@@ -318,6 +318,10 @@ const guardarWan = async (req, res, next) => {
     const { ipWan, mascara, gateway } = req.body;
     const sedeId = ['ADMIN','SECRETARIA'].includes(req.usuario.rol) ? req.usuario.sedeId : (req.query.sedeId || req.usuario.sedeId);
 
+    if (!sedeId) {
+      return res.status(400).json({ error: 'Debe indicar la sede del contrato (sedeId)' });
+    }
+
     const esIp = (v) => /^(\d{1,3}\.){3}\d{1,3}$/.test(v || '');
     if (!esIp(ipWan))   return res.status(400).json({ error: 'IP WAN inválida' });
     if (!esIp(mascara)) return res.status(400).json({ error: 'Máscara inválida' });

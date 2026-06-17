@@ -47,6 +47,8 @@ CREATE TABLE "usuarios" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "sedeId" TEXT,
+    "totpSecret" TEXT,
+    "totpActivo" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "usuarios_pkey" PRIMARY KEY ("id")
 );
@@ -71,9 +73,11 @@ CREATE TABLE "tokens_sesion" (
     "id" TEXT NOT NULL,
     "usuarioId" TEXT NOT NULL,
     "token" TEXT NOT NULL,
+    "refreshToken" TEXT,
     "dispositivo" TEXT,
     "activo" BOOLEAN NOT NULL DEFAULT true,
     "expiresAt" TIMESTAMP(3) NOT NULL,
+    "refreshExpiresAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "fechaCierre" TIMESTAMP(3),
 
@@ -139,6 +143,8 @@ CREATE TABLE "ordenes_servicio" (
     "mensualidad" DECIMAL(10,2),
     "mbps" INTEGER,
     "plan_id" TEXT,
+    "deletedAt" TIMESTAMP(3),
+    "deletedBy" TEXT,
 
     CONSTRAINT "ordenes_servicio_pkey" PRIMARY KEY ("id")
 );
@@ -604,6 +610,18 @@ CREATE TABLE "config_tipos_orden" (
     CONSTRAINT "config_tipos_orden_pkey" PRIMARY KEY ("codigo")
 );
 
+-- CreateTable
+CREATE TABLE "password_reset_tokens" (
+    "id" TEXT NOT NULL,
+    "usuarioId" TEXT NOT NULL,
+    "token" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "usado" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "password_reset_tokens_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "usuarios_email_key" ON "usuarios"("email");
 
@@ -615,6 +633,9 @@ CREATE UNIQUE INDEX "tecnicos_dni_sedeId_key" ON "tecnicos"("dni", "sedeId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "tokens_sesion_token_key" ON "tokens_sesion"("token");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "tokens_sesion_refreshToken_key" ON "tokens_sesion"("refreshToken");
 
 -- CreateIndex
 CREATE INDEX "contratos_sedeId_idx" ON "contratos"("sedeId");
@@ -690,6 +711,9 @@ CREATE INDEX "planes_internet_sede_id_idx" ON "planes_internet"("sede_id");
 
 -- CreateIndex
 CREATE INDEX "idx_planes_internet_sede" ON "planes_internet"("sede_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "password_reset_tokens_token_key" ON "password_reset_tokens"("token");
 
 -- AddForeignKey
 ALTER TABLE "usuarios" ADD CONSTRAINT "usuarios_sedeId_fkey" FOREIGN KEY ("sedeId") REFERENCES "sedes"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -825,6 +849,9 @@ ALTER TABLE "salidas_directas" ADD CONSTRAINT "salidas_directas_sede_id_fkey" FO
 
 -- AddForeignKey
 ALTER TABLE "activos" ADD CONSTRAINT "activos_sede_id_fkey" FOREIGN KEY ("sede_id") REFERENCES "sedes"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "log_actividad" ADD CONSTRAINT "log_actividad_usuarioId_fkey" FOREIGN KEY ("usuarioId") REFERENCES "usuarios"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "devoluciones_tecnico" ADD CONSTRAINT "devoluciones_tecnico_sede_id_fkey" FOREIGN KEY ("sede_id") REFERENCES "sedes"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
