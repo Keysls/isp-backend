@@ -439,7 +439,8 @@ const pendientesOlt = async (req, res, next) => {
         estadoOlt:    { in: ['PENDIENTE_OLT', 'ERROR_OLT'] },
         serialNumber: { not: null },
         instalacion: {
-          completada: true,
+          // Ya no se exige completada:true — con el flujo nuevo, el técnico autentica
+          // ANTES de completar, así que la mayoría de los pendientes están en progreso.
           orden: {
             tipoOrden: { in: TIPOS_QUE_AUTORIZAN_OLT },
             ...(sedeId && { sedeId }),
