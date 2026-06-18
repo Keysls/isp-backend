@@ -1434,12 +1434,12 @@ const registrarRetiro = async (req, res, next) => {
             });
 
             if (onuExistente) {
-              // Reasignar al técnico que la recogió
-              await tx.onu.update({
-                where: { codigoPon: item.codigoPon },
-                data:  { tecnicoId: tecnico.id, salidaDirecta: false },
-              });
-            } else {
+                // Reasignar al técnico que la recogió y limpiar cliente anterior
+                await tx.onu.update({
+                  where: { codigoPon: item.codigoPon },
+                  data:  { tecnicoId: tecnico.id, salidaDirecta: false, cliente: null },
+                });
+              } else {
               // ONU nueva en el sistema (nunca estuvo registrada)
               await tx.onu.create({
                 data: {
