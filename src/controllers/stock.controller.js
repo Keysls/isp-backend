@@ -405,10 +405,12 @@ const enviarProductosSede = async (req, res, next) => {
         });
         if (!onu) throw new Error(`ONU ID ${onuId} no disponible`);
 
-        // Mover la ONU a la sede destino (pendiente de recepción)
+        // Mover la ONU a la sede destino y MARCARLA como "en tránsito" con el envioId.
+        // Esto permite identificar la ONU exacta al cancelar o confirmar,
+        // sin importar si la sede destino tiene otras ONUs del mismo productoId.
         await tx.onu.update({
           where: { id: onu.id },
-          data: { sedeId: sedeDestinoId },
+          data: { sedeId: sedeDestinoId, cliente: `envio_pendiente#${envio.id}` },
         });
 
         // Decrementar stock en sede origen
@@ -464,7 +466,7 @@ const enviarProductosSede = async (req, res, next) => {
 const confirmarEnvio = async (req, res, next) => {
   try {
     const envioId = Number(req.params.id);
-    const sedeId = getSedeId(req);
+    const { rol, sedeId: usuarioSedeId } = req.usuario;
 
     const envio = await prisma.envio.findUnique({
       where: { id: envioId },
@@ -472,7 +474,13 @@ const confirmarEnvio = async (req, res, next) => {
     });
 
     if (!envio) return res.status(404).json({ error: 'Envío no encontrado' });
-    if (envio.sedeId !== sedeId) return res.status(403).json({ error: 'No tienes permiso para confirmar este envío' });
+
+    // ADMIN y SECRETARIA solo pueden confirmar envíos destinados a su propia sede.
+    // SUPERADMIN y OPERADOR_NOC pueden confirmar cualquier envío.
+    if (['ADMIN', 'SECRETARIA'].includes(rol) && envio.sedeId !== usuarioSedeId) {
+      return res.status(403).json({ error: 'No tienes permiso para confirmar este envío' });
+    }
+
     if (envio.estado !== 'PENDIENTE') return res.status(400).json({ error: 'El envío ya fue procesado' });
 
     await prisma.$transaction(async (tx) => {
@@ -483,6 +491,13 @@ const confirmarEnvio = async (req, res, next) => {
           update: { cantidad: { increment: detalle.cantidad } },
         });
       }
+
+      // Limpiar la marca "en tránsito" de las ONUs — ya pertenecen a la sede destino
+      await tx.onu.updateMany({
+        where: { cliente: `envio_pendiente#${envioId}` },
+        data:  { cliente: null },
+      });
+
       await tx.envio.update({
         where: { id: envioId },
         data: { estado: 'RECIBIDO', fechaConfirmacion: new Date() },
@@ -496,7 +511,7 @@ const confirmarEnvio = async (req, res, next) => {
 const cancelarEnvio = async (req, res, next) => {
   try {
     const envioId = Number(req.params.id);
-    const sedeId = getSedeId(req);
+    const { rol, sedeId: usuarioSedeId } = req.usuario;
     const motivo = String(req.body.motivo || '').trim();
 
     if (!motivo) return res.status(400).json({ error: 'Debe indicar el motivo de cancelación' });
@@ -507,9 +522,14 @@ const cancelarEnvio = async (req, res, next) => {
     });
 
     if (!envio) return res.status(404).json({ error: 'Envío no encontrado' });
-    if (envio.sedeId !== sedeId && envio.sedeOrigenId !== sedeId) {
+
+    // ADMIN y SECRETARIA solo pueden cancelar envíos de su propia sede (como origen o destino).
+    // SUPERADMIN y OPERADOR_NOC pueden cancelar cualquier envío.
+    if (['ADMIN', 'SECRETARIA'].includes(rol) &&
+        envio.sedeId !== usuarioSedeId && envio.sedeOrigenId !== usuarioSedeId) {
       return res.status(403).json({ error: 'No tienes permiso para cancelar este envío' });
     }
+
     if (envio.estado !== 'PENDIENTE') return res.status(400).json({ error: 'El envío ya fue procesado' });
 
     await prisma.$transaction(async (tx) => {
@@ -520,6 +540,16 @@ const cancelarEnvio = async (req, res, next) => {
           update: { cantidad: { increment: detalle.cantidad } },
         });
       }
+
+      // FIX DEFINITIVO Bug 2: las ONUs enviadas se marcaron con
+      // cliente = "envio_pendiente#<id>" al momento del envío.
+      // Eso nos permite encontrar EXACTAMENTE cuáles ONUs pertenecen a este envío
+      // sin riesgo de mover ONUs de otra sede o de otro producto.
+      await tx.onu.updateMany({
+        where: { cliente: `envio_pendiente#${envioId}` },
+        data:  { sedeId: envio.sedeOrigenId, cliente: null },
+      });
+
       await tx.envio.update({
         where: { id: envioId },
         data: { estado: 'CANCELADO', motivoCancelacion: motivo, fechaConfirmacion: new Date() },

@@ -8,6 +8,7 @@ const {
   aprobarDevolucion,
   rechazarDevolucion,
   revisarRecojo,
+  listarMalogrados,
 } = require('../controllers/stock.devoluciones.controller');
 
 
@@ -21,7 +22,7 @@ router.post('/salida-directa', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC')
 router.post('/asignar-completo', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.asignarCompleto);
 router.post('/enviar-sede', requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), ctrl.enviarProductosSede);
 router.get('/envios/pendientes', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.listarEnviosPendientes);
-router.get('/envios/origen', requireRol('SUPERADMIN', 'OPERADOR_NOC'), ctrl.listarEnviosOrigen);
+router.get('/envios/origen', requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN', 'SECRETARIA'), ctrl.listarEnviosOrigen);
 router.post('/envios/:id/confirmar', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.confirmarEnvio);
 router.post('/envios/:id/cancelar', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.cancelarEnvio);
 router.get('/stats', requireRol('SUPERADMIN', 'ADMIN', 'OPERADOR_NOC'), ctrl.statsControlador);
@@ -38,5 +39,7 @@ router.get('/devoluciones',                requireRol('SUPERADMIN', 'ADMIN'),   
 router.post('/devoluciones/:id/aprobar',   requireRol('SUPERADMIN', 'ADMIN'),             aprobarDevolucion);
 router.post('/devoluciones/:id/rechazar',  requireRol('SUPERADMIN', 'ADMIN'),             rechazarDevolucion);
 router.post('/recojos/:id/revisar',        requireRol('SUPERADMIN', 'ADMIN'),             revisarRecojo);
+// BUG 7 FIX: nuevo endpoint para auditoria de equipos malogrados
+router.get('/malogrados',                  requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), listarMalogrados);
 
 module.exports = router;

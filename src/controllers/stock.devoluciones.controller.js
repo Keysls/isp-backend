@@ -1,9 +1,10 @@
 const prisma = require('../utils/prisma');
 
 // ── POST /api/stock/mi-devolucion ────────────────────────────
-// El técnico registra una devolución. Puede incluir:
+// El tecnico registra una devolucion. Puede incluir:
 //   - items:   [{ productoId, cantidad }]   material regular sobrante
 //   - recojos: [{ recojoId }]               equipos recogidos de clientes
+//   - onuIds:  [id, id, ...]               ONUs asignadas que devuelve
 const registrarDevolucion = async (req, res, next) => {
   try {
     const usuarioId = req.usuario?.id;
@@ -11,8 +12,8 @@ const registrarDevolucion = async (req, res, next) => {
       where: { usuarioId },
       select: { id: true, sedeId: true },
     });
-    if (!tecnico) return res.status(404).json({ error: 'Técnico no encontrado' });
-    if (!tecnico.sedeId) return res.status(400).json({ error: 'Técnico sin sede asignada' });
+    if (!tecnico) return res.status(404).json({ error: 'Tecnico no encontrado' });
+    if (!tecnico.sedeId) return res.status(400).json({ error: 'Tecnico sin sede asignada' });
 
     const { items = [], recojos = [], onuIds = [], comentario } = req.body;
 
@@ -28,7 +29,7 @@ const registrarDevolucion = async (req, res, next) => {
         const productoId = Number(item.productoId);
         const cantidad   = Number(item.cantidad);
         if (!productoId || cantidad <= 0)
-          return res.status(400).json({ error: 'Producto o cantidad inválidos' });
+          return res.status(400).json({ error: 'Producto o cantidad invalidos' });
         const asignacion = asignaciones.find(a => a.productoId === productoId);
         const disponible = asignacion ? Number(asignacion.cantidad) : 0;
         if (disponible < cantidad)
@@ -47,7 +48,7 @@ const registrarDevolucion = async (req, res, next) => {
         },
       });
       if (onusEncontradas.length !== onuIds.length)
-        return res.status(400).json({ error: 'Una o más ONUs no son válidas o ya fueron procesadas' });
+        return res.status(400).json({ error: 'Una o mas ONUs no son validas o ya fueron procesadas' });
     }
 
     // ── Validar recojos ──────────────────────────────────────
@@ -61,10 +62,10 @@ const registrarDevolucion = async (req, res, next) => {
         },
       });
       if (encontrados.length !== recojoIds.length)
-        return res.status(400).json({ error: 'Uno o más recojos no son válidos o ya fueron procesados' });
+        return res.status(400).json({ error: 'Uno o mas recojos no son validos o ya fueron procesados' });
     }
 
-    // ── Crear devolución ─────────────────────────────────────
+    // ── Crear devolucion ─────────────────────────────────────
     const devolucion = await prisma.$transaction(async (tx) => {
       const dev = await tx.devolucionTecnico.create({
         data: {
@@ -85,23 +86,21 @@ const registrarDevolucion = async (req, res, next) => {
         include: { detalles: true },
       });
 
-      // Marcar recojos como "en_revision" → ya salieron de mano del técnico
-      // Marcar recojos como "en_revision"
-  if (recojos.length > 0) {
-    await tx.recojo.updateMany({
-      where: {
-        id:        { in: recojos.map(r => Number(r.recojoId)) },
-        tecnicoId: tecnico.id,
-      },
-      data: {
-        estado:     'en_revision',
-        comentario: `Devuelto en devolución #${dev.id}`,
-      },
-    });
-  }
+      // Marcar recojos como "en_revision" y guardar referencia a la devolucion
+      if (recojos.length > 0) {
+        await tx.recojo.updateMany({
+          where: {
+            id:        { in: recojos.map(r => Number(r.recojoId)) },
+            tecnicoId: tecnico.id,
+          },
+          data: {
+            estado:     'en_revision',
+            comentario: `Devuelto en devolucion #${dev.id}`,
+          },
+        });
+      }
 
-    // Marcar ONUs como pendientes de devolución
-    // Marcar ONUs como pendientes de devolución
+      // Marcar ONUs como pendientes de devolucion
       if (onuIds.length > 0) {
         const onusADevolver = await tx.onu.findMany({
           where: { id: { in: onuIds.map(Number) }, tecnicoId: tecnico.id },
@@ -113,9 +112,9 @@ const registrarDevolucion = async (req, res, next) => {
           data:  { tecnicoId: null, cliente: `devolucion_pendiente#${dev.id}` },
         });
 
-        // Guardar detalle de ONUs en devolucion_detalles con cantidad 0
-        // usando el campo comentario del recojo para guardar codigoPon
-        // Alternativa: crear recojos asociados a la devolución
+        // BUG 4/5 FIX: Crear recojos con tipoEquipo='ONU' y estado='en_revision'
+        // para que el admin pueda verlos con su codigoPon y nombre de producto.
+        // Estos NO son recojos de retiro de clientes — son ONUs devueltas por el tecnico.
         for (const onu of onusADevolver) {
           await tx.recojo.create({
             data: {
@@ -126,13 +125,13 @@ const registrarDevolucion = async (req, res, next) => {
               estado:        'en_revision',
               grupoOrden:    null,
               registradoPor: String(usuarioId),
-              comentario:    `Devuelto en devolución #${dev.id}`,
+              comentario:    `Devuelto en devolucion #${dev.id}`,
             },
           });
         }
       }
 
-    return dev;
+      return dev;
     });
 
     res.status(201).json({
@@ -151,7 +150,7 @@ const misDevoluciones = async (req, res, next) => {
       where: { usuarioId },
       select: { id: true },
     });
-    if (!tecnico) return res.status(404).json({ error: 'Técnico no encontrado' });
+    if (!tecnico) return res.status(404).json({ error: 'Tecnico no encontrado' });
 
     const devoluciones = await prisma.devolucionTecnico.findMany({
       where:   { tecnicoId: tecnico.id },
@@ -164,21 +163,18 @@ const misDevoluciones = async (req, res, next) => {
       take:    50,
     });
 
-    // Incluir recojos en_revision asociados a cada devolución
-    // Los recojos llevan el comentario "Devuelto en devolución #ID"
     const idsDevolucion = devoluciones.map(d => d.id);
     const recojosRevision = await prisma.recojo.findMany({
-  where: {
-    tecnicoId: tecnico.id,
-    estado:    { in: ['en_revision', 'entregado', 'malogrado'] },
-    comentario: { in: idsDevolucion.map(id => `Devuelto en devolución #${id}`) },
-  },
-  include: {
-    onusRecicladas: { select: { estado: true } },
-  },
+      where: {
+        tecnicoId: tecnico.id,
+        estado:    { in: ['en_revision', 'entregado', 'malogrado'] },
+        comentario: { in: idsDevolucion.map(id => `Devuelto en devolucion #${id}`) },
+      },
+      include: {
+        onusRecicladas: { select: { estado: true } },
+      },
     });
 
-    // Obtener nombres de productos por separado
     const productoIds = [...new Set(recojosRevision.map(r => r.productoId).filter(Boolean))];
     const productos = productoIds.length > 0
       ? await prisma.producto.findMany({
@@ -188,22 +184,18 @@ const misDevoluciones = async (req, res, next) => {
       : [];
     const nombresProductos = Object.fromEntries(productos.map(p => [p.id, p.nombre]));
 
-        // Obtener contrato y abonado desde la orden asociada al recojo
-        const grupoOrdenIds = [...new Set(recojosRevision.map(r => r.grupoOrden).filter(Boolean))];
-        const ordenes = grupoOrdenIds.length > 0
-          ? await prisma.ordenServicio.findMany({
-              where:  { id: { in: grupoOrdenIds } },
-              select: { id: true, contrato: true, abonado: true },
-            })
-          : [];
-        const datosOrden = Object.fromEntries(ordenes.map(o => [o.id, { contrato: o.contrato, abonado: o.abonado }]));
-        
-        // ONUs devueltas pendientes de aprobación — UNA sola query para todas
-            
+    const grupoOrdenIds = [...new Set(recojosRevision.map(r => r.grupoOrden).filter(Boolean))];
+    const ordenes = grupoOrdenIds.length > 0
+      ? await prisma.ordenServicio.findMany({
+          where:  { id: { in: grupoOrdenIds } },
+          select: { id: true, contrato: true, abonado: true },
+        })
+      : [];
+    const datosOrden = Object.fromEntries(ordenes.map(o => [o.id, { contrato: o.contrato, abonado: o.abonado }]));
 
-          res.json(devoluciones.map(d => {
+    res.json(devoluciones.map(d => {
       const recojosAsociados = recojosRevision.filter(
-        r => r.comentario === `Devuelto en devolución #${d.id}`
+        r => r.comentario === `Devuelto en devolucion #${d.id}`
       );
       return {
         id:            d.id,
@@ -217,23 +209,24 @@ const misDevoluciones = async (req, res, next) => {
           unidad:     det.producto.unidad,
           cantidad:   Number(det.cantidad),
         })),
-              recojos: recojosAsociados.map(r => ({
-                id:             r.id,
-                tipoEquipo:     r.tipoEquipo,
-                codigoPon:      r.codigoPon,
-                estado:         r.estado,
-                grupoOrden:     r.grupoOrden || null,
-                nombreProducto: r.productoId ? (nombresProductos[r.productoId] || null) : null,
-                contrato:       r.grupoOrden ? (datosOrden[r.grupoOrden]?.contrato || null) : null,
-                abonado:        r.grupoOrden ? (datosOrden[r.grupoOrden]?.abonado  || null) : null,
-              })),
-              };
-            }));
-          } catch (err) { next(err); }
-        };
+        recojos: recojosAsociados.map(r => ({
+          id:             r.id,
+          tipoEquipo:     r.tipoEquipo,
+          codigoPon:      r.codigoPon,
+          estado:         r.estado,
+          grupoOrden:     r.grupoOrden || null,
+          // BUG 5 FIX: siempre incluir nombre del producto (sea ONU de retiro o de devolucion)
+          nombreProducto: r.productoId ? (nombresProductos[r.productoId] || null) : null,
+          contrato:       r.grupoOrden ? (datosOrden[r.grupoOrden]?.contrato || null) : null,
+          abonado:        r.grupoOrden ? (datosOrden[r.grupoOrden]?.abonado  || null) : null,
+        })),
+      };
+    }));
+  } catch (err) { next(err); }
+};
 
 // ── GET /api/stock/devoluciones ──────────────────────────────
-// Admin lista todas las devoluciones pendientes de su sede
+// Admin lista todas las devoluciones de su sede
 const listarDevoluciones = async (req, res, next) => {
   try {
     const { sedeId: miSede, rol } = req.usuario;
@@ -257,83 +250,78 @@ const listarDevoluciones = async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-  
-    // Enriquecer con recojos en_revision asociados
-    // Traer todos los recojos de todas las devoluciones en UNA sola query
-      const todosLosIds = devoluciones.map(d => d.id);
-      const todosRecojos = await prisma.recojo.findMany({
-        where: {
-          estado:     { in: ['en_revision', 'entregado', 'malogrado'] },
-          comentario: { in: todosLosIds.map(id => `Devuelto en devolución #${id}`) },
+    const todosLosIds = devoluciones.map(d => d.id);
+    const todosRecojos = await prisma.recojo.findMany({
+      where: {
+        estado:     { in: ['en_revision', 'entregado', 'malogrado'] },
+        comentario: { in: todosLosIds.map(id => `Devuelto en devolucion #${id}`) },
+      },
+      include: { onusRecicladas: { select: { id: true, estado: true } } },
+    });
+
+    const productoIdsAll = [...new Set(todosRecojos.map(r => r.productoId).filter(Boolean))];
+    const productosAll   = productoIdsAll.length > 0
+      ? await prisma.producto.findMany({
+          where:  { id: { in: productoIdsAll } },
+          select: { id: true, nombre: true },
+        })
+      : [];
+    const nombresAll = Object.fromEntries(productosAll.map(p => [p.id, p.nombre]));
+
+    const grupoOrdenIdsAll = [...new Set(todosRecojos.map(r => r.grupoOrden).filter(Boolean))];
+    const ordenesAll = grupoOrdenIdsAll.length > 0
+      ? await prisma.ordenServicio.findMany({
+          where:  { id: { in: grupoOrdenIdsAll } },
+          select: { id: true, contrato: true, abonado: true },
+        })
+      : [];
+    const datosOrdenAll = Object.fromEntries(ordenesAll.map(o => [o.id, { contrato: o.contrato, abonado: o.abonado }]));
+
+    const data = devoluciones.map(d => {
+      const recojosAsociados = todosRecojos.filter(
+        r => r.comentario === `Devuelto en devolucion #${d.id}`
+      );
+      return {
+        id:            d.id,
+        estado:        d.estado,
+        comentario:    d.comentario,
+        fecha:         d.createdAt,
+        fechaRevision: d.fechaRevision,
+        revisadoPor:   d.revisadoPor,
+        tecnico: {
+          id:       d.tecnico.id,
+          nombre:   d.tecnico.usuario.nombre,
+          apellido: d.tecnico.usuario.apellido,
         },
-        include: { onusRecicladas: { select: { id: true, estado: true } } },
-      });
-
-      // Nombres de productos en UNA sola query
-      const productoIdsAll = [...new Set(todosRecojos.map(r => r.productoId).filter(Boolean))];
-      const productosAll   = productoIdsAll.length > 0
-        ? await prisma.producto.findMany({
-            where:  { id: { in: productoIdsAll } },
-            select: { id: true, nombre: true },
-          })
-        : [];
-      const nombresAll = Object.fromEntries(productosAll.map(p => [p.id, p.nombre]));
-
-      const grupoOrdenIdsAll = [...new Set(todosRecojos.map(r => r.grupoOrden).filter(Boolean))];
-        const ordenesAll = grupoOrdenIdsAll.length > 0
-          ? await prisma.ordenServicio.findMany({
-              where:  { id: { in: grupoOrdenIdsAll } },
-              select: { id: true, contrato: true, abonado: true },
-            })
-          : [];
-        const datosOrdenAll = Object.fromEntries(ordenesAll.map(o => [o.id, { contrato: o.contrato, abonado: o.abonado }]));
-      const data = devoluciones.map(d => {
-        
-        const recojosAsociados = todosRecojos.filter(
-          r => r.comentario === `Devuelto en devolución #${d.id}`
-        );
-        return {
-          id:            d.id,
-
-          estado:        d.estado,
-          comentario:    d.comentario,
-          fecha:         d.createdAt,
-          fechaRevision: d.fechaRevision,
-          revisadoPor:   d.revisadoPor,
-          tecnico: {
-            id:       d.tecnico.id,
-            nombre:   d.tecnico.usuario.nombre,
-            apellido: d.tecnico.usuario.apellido,
-          },
-          detalles: d.detalles.map(det => ({
-            productoId: det.productoId,
-            nombre:     det.producto.nombre,
-            unidad:     det.producto.unidad,
-            cantidad:   Number(det.cantidad),
-          })),
-
-         
-
-          recojos: recojosAsociados.map(r => ({
-            id:             r.id,
-            tipoEquipo:     r.tipoEquipo,
-            codigoPon:      r.codigoPon,
-            estado:         r.estado,
-            grupoOrden:     r.grupoOrden || null,
-            nombreProducto: r.productoId ? (nombresAll[r.productoId] || null) : null,
-            contrato: r.grupoOrden ? (datosOrdenAll[r.grupoOrden]?.contrato || null) : null,
-            abonado:  r.grupoOrden ? (datosOrdenAll[r.grupoOrden]?.abonado  || null) : null,
-          })),
-        };
-      });
+        detalles: d.detalles.map(det => ({
+          productoId: det.productoId,
+          nombre:     det.producto.nombre,
+          unidad:     det.producto.unidad,
+          cantidad:   Number(det.cantidad),
+        })),
+        // BUG 5 FIX: siempre incluir nombre del producto en recojos
+        recojos: recojosAsociados.map(r => ({
+          id:             r.id,
+          tipoEquipo:     r.tipoEquipo,
+          codigoPon:      r.codigoPon,
+          estado:         r.estado,
+          grupoOrden:     r.grupoOrden || null,
+          nombreProducto: r.productoId ? (nombresAll[r.productoId] || null) : null,
+          contrato: r.grupoOrden ? (datosOrdenAll[r.grupoOrden]?.contrato || null) : null,
+          abonado:  r.grupoOrden ? (datosOrdenAll[r.grupoOrden]?.abonado  || null) : null,
+        })),
+      };
+    });
 
     res.json(data);
   } catch (err) { next(err); }
 };
 
 // ── POST /api/stock/devoluciones/:id/aprobar ─────────────────
-// Admin aprueba material regular → mueve stock
-// Los recojos se procesan individualmente con /recojos/:id/revisar
+// BUG 6 FIX: "Aprobar material" solo mueve el material regular (detalles) al stock.
+// Las ONUs/recojos se procesan INDIVIDUALMENTE via /recojos/:id/revisar (bueno/malogrado).
+// Si hay recojos pendientes sin revisar, el endpoint ahora lo advierte pero igual aprueba
+// el material regular. Si NO hay detalles (solo recojos) y ninguno fue revisado, devuelve error.
 const aprobarDevolucion = async (req, res, next) => {
   try {
     const devolucionId = Number(req.params.id);
@@ -343,9 +331,28 @@ const aprobarDevolucion = async (req, res, next) => {
     });
 
     if (!devolucion)
-      return res.status(404).json({ error: 'Devolución no encontrada' });
+      return res.status(404).json({ error: 'Devolucion no encontrada' });
     if (devolucion.estado !== 'pendiente')
-      return res.status(400).json({ error: 'La devolución ya fue procesada' });
+      return res.status(400).json({ error: 'La devolucion ya fue procesada' });
+
+    // BUG 6 FIX: verificar que si tiene recojos, al menos uno haya sido revisado
+    // o que tenga detalles de material para aprobar.
+    const recojosAsociados = await prisma.recojo.findMany({
+      where: {
+        comentario: `Devuelto en devolucion #${devolucionId}`,
+        estado: 'en_revision',
+      },
+      select: { id: true },
+    });
+    const tieneRecojosEnRevision = recojosAsociados.length > 0;
+    const tieneMaterial = devolucion.detalles.length > 0;
+
+    if (!tieneMaterial && tieneRecojosEnRevision) {
+      return res.status(400).json({
+        error: 'Esta devolucion solo tiene equipos (ONUs/recojos). Primero marca cada uno como Bueno o Malogrado, luego aprueba.',
+        recojosEnRevision: recojosAsociados.length,
+      });
+    }
 
     await prisma.$transaction(async (tx) => {
       for (const detalle of devolucion.detalles) {
@@ -364,21 +371,32 @@ const aprobarDevolucion = async (req, res, next) => {
           create: { sedeId: devolucion.sedeId, productoId, cantidad },
           update: { cantidad: { increment: cantidad } },
         });
+
+        // 3. Registrar entrada de stock para auditoría
+        await tx.entradaStock.create({
+          data: {
+            productoId,
+            cantidad,
+            registradoPor: String(req.usuario.id),
+            sedeId:        devolucion.sedeId,
+            comentario:    `Devolucion tecnico #${devolucionId} (material regular)`,
+          },
+        });
       }
 
-      // Devolver ONUs a sede (disponibles para asignar)
-      // Devolver ONUs a sede (disponibles para asignar)
-        const onusDevueltas = await tx.onu.findMany({
-          where: { cliente: `devolucion_pendiente#${devolucionId}` },
-          select: { productoId: true },
-        });
+      // Procesar ONUs pendientes (cliente = devolucion_pendiente#ID):
+      // Al aprobar el material, las ONUs en estado devolucion_pendiente se liberan a la sede.
+      const onusDevueltas = await tx.onu.findMany({
+        where: { cliente: `devolucion_pendiente#${devolucionId}` },
+        select: { productoId: true },
+      });
 
+      if (onusDevueltas.length > 0) {
         await tx.onu.updateMany({
           where: { cliente: `devolucion_pendiente#${devolucionId}` },
           data:  { cliente: null, sedeId: devolucion.sedeId },
         });
 
-        // Descontar de asignacionTecnico por cada ONU devuelta
         for (const onu of onusDevueltas) {
           await tx.asignacionTecnico.updateMany({
             where: {
@@ -389,8 +407,8 @@ const aprobarDevolucion = async (req, res, next) => {
             data: { cantidad: { decrement: 1 } },
           });
         }
+      }
 
-      // 3. Marcar devolución como aprobada
       await tx.devolucionTecnico.update({
         where: { id: devolucionId },
         data: {
@@ -401,11 +419,20 @@ const aprobarDevolucion = async (req, res, next) => {
       });
     });
 
-    res.json({ ok: true, message: 'Devolución aprobada y stock actualizado' });
+    const msg = tieneRecojosEnRevision
+      ? 'Material aprobado. Aun hay equipos pendientes de revision (Bueno/Malogrado).'
+      : 'Devolucion aprobada y stock actualizado';
+
+    res.json({ ok: true, message: msg, recojosEnRevision: recojosAsociados.length });
   } catch (err) { next(err); }
 };
 
 // ── POST /api/stock/devoluciones/:id/rechazar ────────────────
+// BUG 7 FIX: Al rechazar, el material regular vuelve al inventario del tecnico
+// (ya estaba, solo la devolucion queda marcada como rechazada).
+// Los recojos en_revision vuelven a en_mano.
+// Las ONUs devolucion_pendiente vuelven al tecnico.
+// El admin puede rechazar cuando el tecnico entrego fisicamente menos de lo declarado.
 const rechazarDevolucion = async (req, res, next) => {
   try {
     const devolucionId = Number(req.params.id);
@@ -415,27 +442,31 @@ const rechazarDevolucion = async (req, res, next) => {
       where: { id: devolucionId },
     });
     if (!devolucion)
-      return res.status(404).json({ error: 'Devolución no encontrada' });
+      return res.status(404).json({ error: 'Devolucion no encontrada' });
     if (devolucion.estado !== 'pendiente')
-      return res.status(400).json({ error: 'La devolución ya fue procesada' });
+      return res.status(400).json({ error: 'La devolucion ya fue procesada' });
 
-    // Devolver los recojos a "en_mano" si se rechaza
     await prisma.$transaction(async (tx) => {
+      // Recojos vuelven a "en_mano"
       await tx.recojo.updateMany({
         where: {
           tecnicoId:  devolucion.tecnicoId,
           estado:     'en_revision',
-          comentario: `Devuelto en devolución #${devolucionId}`,
+          comentario: `Devuelto en devolucion #${devolucionId}`,
         },
         data: { estado: 'en_mano', comentario: null },
       });
 
-      // Devolver ONUs al técnico si se rechaza
-        await tx.onu.updateMany({
-          where: { cliente: `devolucion_pendiente#${devolucionId}` },
-          data:  { tecnicoId: devolucion.tecnicoId, cliente: null },
-        });
+      // ONUs vuelven al tecnico
+      await tx.onu.updateMany({
+        where: { cliente: `devolucion_pendiente#${devolucionId}` },
+        data:  { tecnicoId: devolucion.tecnicoId, cliente: null },
+      });
 
+      // BUG 7: El material regular (detalles) NO se mueve al rechazar —
+      // sigue en el inventario del tecnico (AsignacionTecnico sin cambios).
+      // La devolucion queda marcada como rechazada para que el tecnico
+      // haga un nuevo ingreso correcto.
       await tx.devolucionTecnico.update({
         where: { id: devolucionId },
         data: {
@@ -447,12 +478,18 @@ const rechazarDevolucion = async (req, res, next) => {
       });
     });
 
-    res.json({ ok: true, message: 'Devolución rechazada' });
+    res.json({ ok: true, message: 'Devolucion rechazada. El tecnico debe hacer un nuevo ingreso.' });
   } catch (err) { next(err); }
 };
 
 // ── POST /api/stock/recojos/:id/revisar ──────────────────────
-// Admin revisa un recojo físicamente: bueno → entra al stock | malogrado → descartado
+// BUG 4 FIX: Admin revisa un recojo —
+//   bueno    → entra al stock (StockSede + EntradaStock) + ONU disponible para asignar
+//   malogrado → entra a lista de malogrados (tabla onus_recicladas con estado='malogrado')
+//              pero NO suma al stock. El admin puede ver auditoria de malogrados.
+// IMPORTANTE: los recojos de tipo 'retiro de cliente' y los de 'devolucion de ONU asignada'
+// se procesan igual, pero solo los de retiro de cliente deben marcarse como "reciclados".
+// Los de devolucion de ONU asignada NO deben marcarse como reciclados (eran ONUs nuevas).
 const revisarRecojo = async (req, res, next) => {
   try {
     const recojoId = Number(req.params.id);
@@ -470,7 +507,6 @@ const revisarRecojo = async (req, res, next) => {
       return res.status(400).json({ error: `El recojo ya fue procesado (estado: ${recojo.estado})` });
 
     await prisma.$transaction(async (tx) => {
-      // Una sola búsqueda del técnico
       const tecnico = recojo.productoId
         ? await tx.tecnico.findUnique({
             where:  { id: recojo.tecnicoId },
@@ -486,57 +522,89 @@ const revisarRecojo = async (req, res, next) => {
           create: { sedeId, productoId: recojo.productoId, cantidad: 1 },
           update: { cantidad: { increment: 1 } },
         });
-        // Registrar en OnuReciclada
+
+        // Registrar entrada de stock para auditoria
+        await tx.entradaStock.create({
+          data: {
+            productoId:    recojo.productoId,
+            cantidad:      1,
+            registradoPor: String(req.usuario.id),
+            sedeId,
+            comentario:    `Devolucion/retiro revisado OK — recojo #${recojoId}` + (recojo.codigoPon ? ` (${recojo.codigoPon})` : ''),
+          },
+        });
+
+        // BUG 4 FIX: solo marcar como OnuReciclada si viene de un retiro de cliente
+        // (no de una devolucion de ONU asignada). Los recojos de devolucion tienen
+        // grupoOrden=null y comentario con "Devuelto en devolucion #...".
+        const esDeRetiroCliente = recojo.grupoOrden !== null ||
+          (recojo.comentario && !recojo.comentario.startsWith('Devuelto en devolucion'));
+
+        if (esDeRetiroCliente) {
+          await tx.onuReciclada.create({
+            data: {
+              recojoId:    recojo.id,
+              tipoEquipo:  recojo.tipoEquipo || 'ONU',
+              codigoPon:   recojo.codigoPon  || null,
+              productoId:  recojo.productoId,
+              sedeId,
+              estado:      'revision',
+              comentario:  comentario || 'Aprobado por admin',
+              revisadoPor: String(req.usuario.id),
+            },
+          });
+        }
+
+        // Si tiene codigo PON, registrar/actualizar en tabla onus para disponible
+        if (recojo.codigoPon) {
+          const onuExistente = await tx.onu.findUnique({
+            where: { codigoPon: recojo.codigoPon },
+          });
+          if (onuExistente) {
+            await tx.onu.update({
+              where: { codigoPon: recojo.codigoPon },
+              data:  { tecnicoId: null, cliente: null, sedeId, salidaDirecta: false },
+            });
+          } else {
+            await tx.onu.create({
+              data: {
+                codigoPon:  recojo.codigoPon,
+                productoId: recojo.productoId,
+                sedeId,
+                tecnicoId:  null,
+                cliente:    null,
+              },
+            });
+          }
+        }
+      }
+
+      if (resultado === 'malogrado' && recojo.productoId && sedeId) {
+        // BUG 7 FIX: registrar como malogrado en onus_recicladas con estado='malogrado'
+        // para poder hacer auditoria de equipos malogrados.
+        // NO suma al stock — el equipo esta inutilizable.
         await tx.onuReciclada.create({
-
-          
-
           data: {
             recojoId:    recojo.id,
             tipoEquipo:  recojo.tipoEquipo || 'ONU',
             codigoPon:   recojo.codigoPon  || null,
             productoId:  recojo.productoId,
             sedeId,
-            estado:      'revision',
-            comentario:  comentario || 'Aprobado por admin',
+            estado:      'malogrado',
+            comentario:  comentario || 'Descartado por admin',
             revisadoPor: String(req.usuario.id),
           },
         });
-
-        // Si tiene código PON, registrar/actualizar en tabla onus para que esté disponible
-          if (recojo.codigoPon) {
-            const onuExistente = await tx.onu.findUnique({
-              where: { codigoPon: recojo.codigoPon },
-            });
-            if (onuExistente) {
-              await tx.onu.update({
-                where: { codigoPon: recojo.codigoPon },
-                data:  { tecnicoId: null, cliente: null, sedeId, salidaDirecta: false },
-              });
-            } else {
-              await tx.onu.create({
-                data: {
-                  codigoPon:  recojo.codigoPon,
-                  productoId: recojo.productoId,
-                  sedeId,
-                  tecnicoId:  null,
-                  cliente:    null,
-                },
-              });
-            }
-          }
       }
 
-      // Descontar del inventario del técnico (siempre: bueno o malogrado)
-      // Descontar del inventario del técnico (siempre: bueno o malogrado)
-        if (recojo.productoId) {
-          await tx.asignacionTecnico.updateMany({
-            where: { tecnicoId: recojo.tecnicoId, productoId: recojo.productoId },
-            data:  { cantidad: { decrement: 1 } },
-          });
-        }
+      // Descontar del inventario del tecnico (siempre: bueno o malogrado)
+      if (recojo.productoId) {
+        await tx.asignacionTecnico.updateMany({
+          where: { tecnicoId: recojo.tecnicoId, productoId: recojo.productoId },
+          data:  { cantidad: { decrement: 1 } },
+        });
+      }
 
-      // Actualizar estado del recojo
       await tx.recojo.update({
         where: { id: recojoId },
         data: {
@@ -549,8 +617,88 @@ const revisarRecojo = async (req, res, next) => {
     res.json({
       ok:      true,
       message: resultado === 'bueno'
-        ? '✅ Equipo aprobado — ingresó al stock'
-        : '❌ Equipo descartado',
+        ? 'Equipo aprobado — ingreso al stock'
+        : 'Equipo marcado como malogrado — registrado para auditoria',
+    });
+  } catch (err) { next(err); }
+};
+
+// ── GET /api/stock/malogrados ────────────────────────────────
+// BUG 7 FIX (nuevo endpoint): Lista de equipos malogrados para auditoria.
+// Solo ADMIN y SUPERADMIN/NOC pueden acceder.
+const listarMalogrados = async (req, res, next) => {
+  try {
+    const { sedeId: miSede, rol } = req.usuario;
+    const { desde, hasta } = req.query;
+
+    const where = {
+      estado: 'malogrado',
+      ...(rol === 'ADMIN' && { sedeId: miSede }),
+      ...(desde && { createdAt: { gte: new Date(desde) } }),
+      ...(hasta && { createdAt: { lte: new Date(hasta + 'T23:59:59') } }),
+    };
+
+    const malogrados = await prisma.onuReciclada.findMany({
+      where,
+      include: {
+        recojo: {
+          select: {
+            tecnicoId: true,
+            comentario: true,
+            grupoOrden: true,
+            createdAt:  true,
+          },
+        },
+        sede: { select: { nombre: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Enriquecer con nombre de producto y tecnico
+    const productoIds = [...new Set(malogrados.map(m => m.productoId).filter(Boolean))];
+    const tecnicoIds  = [...new Set(malogrados.map(m => m.recojo?.tecnicoId).filter(Boolean))];
+
+    const [productos, tecnicos] = await Promise.all([
+      productoIds.length > 0
+        ? prisma.producto.findMany({ where: { id: { in: productoIds } }, select: { id: true, nombre: true } })
+        : [],
+      tecnicoIds.length > 0
+        ? prisma.tecnico.findMany({
+            where: { id: { in: tecnicoIds } },
+            include: { usuario: { select: { nombre: true, apellido: true } } },
+          })
+        : [],
+    ]);
+
+    const nombresProductos = Object.fromEntries(productos.map(p => [p.id, p.nombre]));
+    const nombresTecnicos  = Object.fromEntries(
+      tecnicos.map(t => [t.id, `${t.usuario.nombre} ${t.usuario.apellido}`.trim()])
+    );
+
+    // Enriquecer ordenes
+    const grupoOrdenIds = [...new Set(malogrados.map(m => m.recojo?.grupoOrden).filter(Boolean))];
+    const ordenes = grupoOrdenIds.length > 0
+      ? await prisma.ordenServicio.findMany({
+          where:  { id: { in: grupoOrdenIds } },
+          select: { id: true, nServicio: true, abonado: true, contrato: true },
+        })
+      : [];
+    const datosOrden = Object.fromEntries(ordenes.map(o => [o.id, o]));
+
+    res.json({
+      total:      malogrados.length,
+      malogrados: malogrados.map(m => ({
+        id:             m.id,
+        tipoEquipo:     m.tipoEquipo,
+        codigoPon:      m.codigoPon || null,
+        nombreProducto: m.productoId ? (nombresProductos[m.productoId] || null) : null,
+        sede:           m.sede?.nombre || null,
+        revisadoPor:    m.revisadoPor || null,
+        comentario:     m.comentario || null,
+        fecha:          m.createdAt,
+        tecnico:        m.recojo?.tecnicoId ? (nombresTecnicos[m.recojo.tecnicoId] || null) : null,
+        orden:          m.recojo?.grupoOrden ? (datosOrden[m.recojo.grupoOrden] || null) : null,
+      })),
     });
   } catch (err) { next(err); }
 };
@@ -562,4 +710,5 @@ module.exports = {
   aprobarDevolucion,
   rechazarDevolucion,
   revisarRecojo,
+  listarMalogrados,
 };
