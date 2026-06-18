@@ -108,7 +108,7 @@ function baseTemplate({ titulo, subtitulo, color, filas, nota }) {
 
     <!-- Footer -->
     <div style="background:#f9fafb;padding:16px 28px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;text-align:center;">
-      EnetFiber · Sistema de gestión ISP · ${new Date().toLocaleDateString('es-PE', { day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+      Enet Fiber Perú · Sistema de gestión ISP · ${new Date().toLocaleDateString('es-PE', { day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' })}
     </div>
   </div>
 </body>

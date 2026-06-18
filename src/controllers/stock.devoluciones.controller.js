@@ -344,15 +344,11 @@ const aprobarDevolucion = async (req, res, next) => {
       },
       select: { id: true },
     });
+    
     const tieneRecojosEnRevision = recojosAsociados.length > 0;
-    const tieneMaterial = devolucion.detalles.length > 0;
 
-    if (!tieneMaterial && tieneRecojosEnRevision) {
-      return res.status(400).json({
-        error: 'Esta devolucion solo tiene equipos (ONUs/recojos). Primero marca cada uno como Bueno o Malogrado, luego aprueba.',
-        recojosEnRevision: recojosAsociados.length,
-      });
-    }
+    // Flujo: primero se acepta la devolucion (aprueba material regular),
+    // luego el admin revisa cada equipo individualmente con Bueno/Malo.
 
     await prisma.$transaction(async (tx) => {
       for (const detalle of devolucion.detalles) {
