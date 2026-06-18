@@ -1,4 +1,5 @@
 const prisma = require('../utils/prisma');
+const { verificarYAlertarStockBajo, notificarIngreso } = require('../utils/stockAlertas');
 const { notificarEnvioPendiente, verificarAlertaStock } = require('../services/notificaciones.service');
 
 const toInt = (value, fallback = 0) => {
@@ -119,6 +120,12 @@ const entradaStock = async (req, res, next) => {
 
     res.json({ ok: true, message: 'Entrada registrada correctamente' });
 
+    // Correo: notificar ingreso (solo sede principal, fire-and-forget)
+    notificarIngreso(sedeId, items.map(i => ({
+      productoId: Number(i.producto_id ?? i.productoId),
+      cantidad:   Number(i.cantidad),
+    })), { usuarioId: req.usuario?.id, comentario: req.body.comentario || null }).catch(() => {});
+
     // Log de auditoría (fuera de la transacción para no bloquearla)
     await prisma.logActividad.create({
       data: {
@@ -188,6 +195,7 @@ const salidaStock = async (req, res, next) => {
     try {
       const productoId = Number(req.body.producto_id ?? req.body.productoId);
       if (sedeId && productoId) await verificarAlertaStock(sedeId, productoId);
+      verificarYAlertarStockBajo(sedeId, [productoId]).catch(() => {}); // correo
     } catch (_) {}
 
     res.json({ ok: true, message: 'Salida registrada correctamente' });
@@ -222,6 +230,11 @@ const salidaStockMultiple = async (req, res, next) => {
     }));
 
     res.json({ ok: true, message: 'Salida multiple registrada correctamente' });
+
+    // Correo: alerta stock bajo (solo sede principal, fire-and-forget)
+    const productoIds = items.map(i => Number(i.producto_id ?? i.productoId)).filter(Boolean);
+    verificarYAlertarStockBajo(sedeId, productoIds).catch(() => {});
+
   } catch (err) { next(err); }
 };
 
@@ -284,6 +297,7 @@ const asignarCompleto = async (req, res, next) => {
       for (const productoId of productosAfectados) {
         await verificarAlertaStock(sedeId, productoId);
       }
+      verificarYAlertarStockBajo(sedeId, [...productosAfectados]).catch(() => {}); // correo
     } catch (_) {}
 
     res.json({ ok: true, message: 'Asignacion registrada correctamente' });
@@ -343,6 +357,7 @@ const salidaDirecta = async (req, res, next) => {
       for (const productoId of productosAfectados) {
         await verificarAlertaStock(sedeId, productoId);
       }
+      verificarYAlertarStockBajo(sedeId, [...productosAfectados]).catch(() => {}); // correo
     } catch (_) {}
 
     res.json({ ok: true, message: 'Salida directa registrada correctamente' });
@@ -451,6 +466,18 @@ const enviarProductosSede = async (req, res, next) => {
 
     res.json({ ok: true, message: 'Envio registrado correctamente' });
 
+    // Correo: alerta stock bajo en sede origen tras el envío (solo si es sede principal)
+    try {
+      const pids = [
+        ...items.map(i => Number(i.producto_id ?? i.productoId)).filter(Boolean),
+      ];
+      if (onuIds.length > 0) {
+        const onus = await prisma.onu.findMany({ where: { id: { in: onuIds.map(Number) } }, select: { productoId: true } });
+        onus.forEach(o => pids.push(o.productoId));
+      }
+      if (pids.length > 0) verificarYAlertarStockBajo(sedeOrigenId, [...new Set(pids)]).catch(() => {});
+    } catch (_) {}
+
     await prisma.logActividad.create({
       data: {
         usuarioId: req.usuario?.id || null,
@@ -505,6 +532,7 @@ const confirmarEnvio = async (req, res, next) => {
     });
 
     res.json({ ok: true, message: 'Envío confirmado correctamente' });
+
   } catch (err) { next(err); }
 };
 
@@ -557,6 +585,14 @@ const cancelarEnvio = async (req, res, next) => {
     });
 
     res.json({ ok: true, message: 'Envío cancelado y stock devuelto al origen' });
+
+    // Correo: notificar ingreso en sede origen si es la sede principal (stock regresó)
+    notificarIngreso(envio.sedeOrigenId, envio.detalles.map(d => ({
+      productoId: d.productoId,
+      cantidad:   Number(d.cantidad),
+    })), {
+      comentario: `Stock devuelto por cancelación de envío guía: ${envio.guia || envio.id}`,
+    }).catch(() => {});
   } catch (err) { next(err); }
 };
 
