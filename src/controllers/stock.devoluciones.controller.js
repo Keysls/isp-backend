@@ -384,7 +384,7 @@ const aprobarDevolucion = async (req, res, next) => {
       // Al aprobar el material, las ONUs en estado devolucion_pendiente se liberan a la sede.
       const onusDevueltas = await tx.onu.findMany({
         where: { cliente: `devolucion_pendiente#${devolucionId}` },
-        select: { productoId: true },
+        select: { productoId: true, codigoPon: true },
       });
 
       if (onusDevueltas.length > 0) {
@@ -405,14 +405,23 @@ const aprobarDevolucion = async (req, res, next) => {
         }
       }
 
-      // FIX: descontar de inmediato del inventario del tecnico los equipos
-      // (recojos) en_revision asociados a esta devolucion. El stock de SEDE
-      // no se suma aqui — eso ocurre solo cuando se revisa Bueno/Malo — pero
-      // el tecnico ya no debe seguir viendo estos equipos como suyos una vez
-      // que la devolucion fue aceptada.
+      // FIX: descontar de inmediato del inventario del tecnico los EQUIPOS
+      // (recojos) en_revision asociados a esta devolucion — pero SOLO los que
+      // no sean ONUs de devolucion directa (esas ya se descontaron arriba en
+      // el bloque "onusDevueltas"). Sin este filtro se descuenta 2 veces la
+      // misma ONU: una por onu.cliente=devolucion_pendiente y otra por su
+      // Recojo asociado (ambos se crean juntos en registrarDevolucion).
       for (const recojo of recojosAsociados) {
-        const r = await tx.recojo.findUnique({ where: { id: recojo.id }, select: { productoId: true } });
-        if (r?.productoId) {
+        const r = await tx.recojo.findUnique({
+          where: { id: recojo.id },
+          select: { productoId: true, tipoEquipo: true, codigoPon: true },
+        });
+        // Comparar por codigoPon EXACTO — cada ONU es unica, esto evita falsos
+        // positivos cuando hay 2 ONUs del mismo productoId pero codigoPon distinto
+        // (una de devolucion directa y otra de retiro de cliente, por ejemplo).
+        const esOnuDeDevolucionDirecta = r?.tipoEquipo === 'ONU' && r?.codigoPon &&
+          onusDevueltas.some(o => o.codigoPon === r.codigoPon);
+        if (r?.productoId && !esOnuDeDevolucionDirecta) {
           await tx.asignacionTecnico.updateMany({
             where: {
               tecnicoId:  devolucion.tecnicoId,
