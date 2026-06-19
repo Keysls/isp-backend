@@ -660,8 +660,9 @@ const statsControlador = async (req, res, next) => {
     const sedeId = getSedeId(req);
     if (!sedeId) return res.status(400).json({ error: 'Debe indicar una sede' });
 
-    const [tecnicos, stock, stockBajo, ultimasSalidas, asignaciones] = await Promise.all([
+    const [tecnicos, totalProductos, stock, stockBajo, ultimasSalidas, asignaciones] = await Promise.all([
       prisma.tecnico.count({ where: { activo: true, usuario: { sedeId } } }),
+      prisma.stockSede.count({ where: { sedeId } }),
       prisma.stockSede.aggregate({ where: { sedeId }, _sum: { cantidad: true } }),
       prisma.stockSede.findMany({
         where: {
@@ -704,6 +705,7 @@ const statsControlador = async (req, res, next) => {
 
     res.json({
       tecnicos,
+      totalProductos,
       itemsEnSede: stock._sum.cantidad || 0,
       movimientosHoy: ultimasSalidas.length,
       stockBajo: stockBajo
