@@ -712,6 +712,68 @@ const listarMalogrados = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── POST /api/stock/malogrados/:id/reingresar ────────────────
+// Revierte una ONU marcada como malogrado: vuelve a estar disponible
+// en el inventario de la sede y suma 1 al stock. El registro de
+// auditoria en onus_recicladas NO se borra, solo cambia su estado
+// a 'reingresado' para conservar el historial completo.
+const reingresarOnuMalograda = async (req, res, next) => {
+  try {
+    const malogradoId = Number(req.params.id);
+    const { comentario } = req.body;
+
+    const malogrado = await prisma.onuReciclada.findUnique({
+      where: { id: malogradoId },
+    });
+    if (!malogrado)
+      return res.status(404).json({ error: 'Registro de malogrado no encontrado' });
+    if (malogrado.estado !== 'malogrado')
+      return res.status(400).json({ error: `Este registro ya fue procesado (estado: ${malogrado.estado})` });
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Reactivar la ONU (si tiene codigo PON)
+      if (malogrado.codigoPon) {
+        await tx.onu.updateMany({
+          where: { codigoPon: malogrado.codigoPon },
+          data:  { salidaDirecta: false, tecnicoId: null, sedeId: malogrado.sedeId },
+        });
+      }
+
+      // 2. Sumar al stock de la sede (no se sumo cuando se marco como malogrado)
+      if (malogrado.productoId) {
+        await tx.stockSede.upsert({
+          where:  { sedeId_productoId: { sedeId: malogrado.sedeId, productoId: malogrado.productoId } },
+          create: { sedeId: malogrado.sedeId, productoId: malogrado.productoId, cantidad: 1 },
+          update: { cantidad: { increment: 1 } },
+        });
+
+        // 3. Registrar entrada de stock para auditoria
+        await tx.entradaStock.create({
+          data: {
+            productoId:    malogrado.productoId,
+            cantidad:      1,
+            registradoPor: String(req.usuario.id),
+            sedeId:        malogrado.sedeId,
+            comentario:    `Reingreso de equipo malogrado #${malogradoId}` + (malogrado.codigoPon ? ` (${malogrado.codigoPon})` : '') + (comentario ? ` — ${comentario}` : ''),
+          },
+        });
+      }
+
+      // 4. Actualizar el registro de auditoria — conserva el historial, no se borra
+      await tx.onuReciclada.update({
+        where: { id: malogradoId },
+        data: {
+          estado:      'reingresado',
+          comentario:  comentario || `${malogrado.comentario || ''} — Reingresado por admin`.trim(),
+          revisadoPor: String(req.usuario.id),
+        },
+      });
+    });
+
+    res.json({ ok: true, message: 'Equipo reingresado al stock correctamente' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   registrarDevolucion,
   misDevoluciones,
@@ -720,4 +782,5 @@ module.exports = {
   rechazarDevolucion,
   revisarRecojo,
   listarMalogrados,
+  reingresarOnuMalograda,
 };

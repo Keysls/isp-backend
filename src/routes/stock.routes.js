@@ -9,6 +9,7 @@ const {
   rechazarDevolucion,
   revisarRecojo,
   listarMalogrados,
+  reingresarOnuMalograda,
 } = require('../controllers/stock.devoluciones.controller');
 
 
@@ -41,5 +42,6 @@ router.post('/devoluciones/:id/rechazar',  requireRol('SUPERADMIN', 'ADMIN'),   
 router.post('/recojos/:id/revisar',        requireRol('SUPERADMIN', 'ADMIN'),             revisarRecojo);
 // BUG 7 FIX: nuevo endpoint para auditoria de equipos malogrados
 router.get('/malogrados',                  requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), listarMalogrados);
+router.post('/malogrados/:id/reingresar',  requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), reingresarOnuMalograda);
 
 module.exports = router;
