@@ -14,7 +14,7 @@ const TIPOS = [
   { codigo: 'AVERIA_I',            label: 'Avería Internet',            servicio: 'INTERNET', flujo: 'NOC_TECNICO',     requiereWan: true,  orden: 40 },
   { codigo: 'BAJA_SERVICIO_I',     label: 'Baja de Servicio Internet',  servicio: 'INTERNET', flujo: 'SOLO_NOC',        esBaja: true,        orden: 50 },
   { codigo: 'CAMBIO_CONTRASENA_I', label: 'Cambio de Contraseña',       servicio: 'INTERNET', flujo: 'SOLO_NOC',        orden: 60 },
-  { codigo: 'CAMBIO_DOMICILIO_I',  label: 'Cambio de Domicilio Internet',servicio: 'INTERNET', flujo: 'NOC_TECNICO',    requiereWan: true,  orden: 70 },
+  { codigo: 'CAMBIO_DOMICILIO_I',  label: 'Cambio de Domicilio Internet',servicio: 'INTERNET', flujo: 'NOC_TECNICO',    requiereWan: true, autorizaOlt: true,  orden: 70 },
   { codigo: 'CAMBIO_EQUIPO_I',     label: 'Cambio de Equipo Internet',  servicio: 'INTERNET', flujo: 'NOC_TECNICO',     requiereWan: true,  autorizaOlt: true,  esCambioEquipo: true, orden: 80 },
   { codigo: 'CAMBIO_PLAN_I',       label: 'Cambio de Plan Internet',    servicio: 'INTERNET', flujo: 'SOLO_NOC',        orden: 90 },
   { codigo: 'CAMBIO_TITULAR_I',    label: 'Cambio de Titular Internet', servicio: 'INTERNET', flujo: 'SOLO_NOC',        orden: 100 },

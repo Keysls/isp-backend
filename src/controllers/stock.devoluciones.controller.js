@@ -405,6 +405,25 @@ const aprobarDevolucion = async (req, res, next) => {
         }
       }
 
+      // FIX: descontar de inmediato del inventario del tecnico los equipos
+      // (recojos) en_revision asociados a esta devolucion. El stock de SEDE
+      // no se suma aqui — eso ocurre solo cuando se revisa Bueno/Malo — pero
+      // el tecnico ya no debe seguir viendo estos equipos como suyos una vez
+      // que la devolucion fue aceptada.
+      for (const recojo of recojosAsociados) {
+        const r = await tx.recojo.findUnique({ where: { id: recojo.id }, select: { productoId: true } });
+        if (r?.productoId) {
+          await tx.asignacionTecnico.updateMany({
+            where: {
+              tecnicoId:  devolucion.tecnicoId,
+              productoId: r.productoId,
+              sedeId:     devolucion.sedeId,
+            },
+            data: { cantidad: { decrement: 1 } },
+          });
+        }
+      }
+
       await tx.devolucionTecnico.update({
         where: { id: devolucionId },
         data: {
@@ -606,8 +625,11 @@ const revisarRecojo = async (req, res, next) => {
         }
       }
 
-      // Descontar del inventario del tecnico (siempre: bueno o malogrado)
-      if (recojo.productoId) {
+      // Descontar del inventario del tecnico — SOLO si no se descontó ya.
+      // Si el recojo viene de una devolucion (comentario "Devuelto en devolucion #X"),
+      // el descuento ya ocurrió en aprobarDevolucion al aceptar. Evita doble descuento.
+      const vieneDeDevolucion = recojo.comentario?.startsWith('Devuelto en devolucion');
+      if (recojo.productoId && !vieneDeDevolucion) {
         await tx.asignacionTecnico.updateMany({
           where: { tecnicoId: recojo.tecnicoId, productoId: recojo.productoId },
           data:  { cantidad: { decrement: 1 } },

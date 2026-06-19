@@ -100,8 +100,8 @@ const TIPOS_SOLO_NOC    = [...TIPOS_SOLO_NOC_I,    ...TIPOS_SOLO_NOC_D];
 
 // ── Tipos que autorizan ONU en la OLT (tienen componente Internet) ──
 const TIPOS_AUTORIZAN_OLT = [
-  'INSTALACION_I', 'CAMBIO_EQUIPO_I', 'RECONEXION_I', 'TRASLADO_I',
-  'INSTALACION_D', 'CAMBIO_EQUIPO_D', 'RECONEXION_D', 'TRASLADO_D',
+  'INSTALACION_I', 'CAMBIO_EQUIPO_I', 'RECONEXION_I', 'TRASLADO_I', 'CAMBIO_DOMICILIO_I',
+  'INSTALACION_D', 'CAMBIO_EQUIPO_D', 'RECONEXION_D', 'TRASLADO_D', 'CAMBIO_DOMICILIO_D',
 ];
 
 // ── WAN requerida por el NOC ───────────────────────────────────
