@@ -344,11 +344,11 @@ const aprobarDevolucion = async (req, res, next) => {
       },
       select: { id: true },
     });
-    
     const tieneRecojosEnRevision = recojosAsociados.length > 0;
 
     // Flujo: primero se acepta la devolucion (aprueba material regular),
     // luego el admin revisa cada equipo individualmente con Bueno/Malo.
+    // No se bloquea aunque haya equipos sin revisar.
 
     await prisma.$transaction(async (tx) => {
       for (const detalle of devolucion.detalles) {
@@ -591,6 +591,19 @@ const revisarRecojo = async (req, res, next) => {
             revisadoPor: String(req.usuario.id),
           },
         });
+
+        // FIX: la ONU malograda no debe seguir apareciendo como "en sede"/disponible.
+        // Se usa salidaDirecta=true (la misma señal que usa todo el sistema para
+        // marcar una ONU como no disponible/asignable). El campo `cliente` NO se
+        // toca porque está reservado para el id de la orden de servicio cuando la
+        // ONU está instalada — la trazabilidad real de "malogrado" vive en
+        // onus_recicladas (tabla de auditoría), no en este campo.
+        if (recojo.codigoPon) {
+          await tx.onu.updateMany({
+            where: { codigoPon: recojo.codigoPon },
+            data:  { tecnicoId: null, salidaDirecta: true },
+          });
+        }
       }
 
       // Descontar del inventario del tecnico (siempre: bueno o malogrado)
