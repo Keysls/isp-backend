@@ -1020,15 +1020,23 @@ const inventarioTecnico = async (req, res, next) => {
     res.json({
       tecnicoId,
       totalItems,
-      asignaciones: asignaciones.map(a => ({
-        productoId: a.productoId,
-        nombre:     a.producto.nombre,
-        codigo:     a.producto.codigo,
-        categoria:  a.producto.categoria,
-        unidad:     a.producto.unidad,
-        cantidad:   Number(a.cantidad),
-        fecha:      a.fecha,
-      })),
+      asignaciones: asignaciones.map(a => {
+        const esMedible = a.producto.esMedible && a.producto.metrosPorUnidad;
+        const cantBase  = Number(a.cantidad);
+        return {
+          productoId: a.productoId,
+          nombre:     a.producto.nombre,
+          codigo:     a.producto.codigo,
+          categoria:  a.producto.categoria,
+          unidad:     esMedible ? 'm' : a.producto.unidad,
+          // FIX: convertir a metros igual que se hace con los consumos —
+          // antes se devolvía la cantidad cruda (rollos), mezclando unidades
+          // con los consumos (ya en metros) y dando resultados absurdos
+          // como "0 de 1 metros, gastado: 100".
+          cantidad:   esMedible ? cantBase * a.producto.metrosPorUnidad : cantBase,
+          fecha:      a.fecha,
+        };
+      }),
       onus: onus.map(o => ({
         id:        o.id,
         codigoPon: o.codigoPon,
