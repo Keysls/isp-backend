@@ -720,7 +720,7 @@ const listarMalogrados = async (req, res, next) => {
 const reingresarOnuMalograda = async (req, res, next) => {
   try {
     const malogradoId = Number(req.params.id);
-    const { comentario } = req.body;
+    const { comentario } = req.body || {};
 
     const malogrado = await prisma.onuReciclada.findUnique({
       where: { id: malogradoId },
