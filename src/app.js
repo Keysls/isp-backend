@@ -119,6 +119,7 @@ app.use('/api/tecnicos',        require('./routes/tecnicos.routes'));
 app.use('/api/ordenes',         require('./routes/ordenes.routes'));
 app.use('/api/instalaciones',   require('./routes/instalaciones.routes'));
 app.use('/api/olt',             require('./routes/olt/olt.routes'));
+app.use('/api/equipos-cabecera', require('./routes/equipoCabecera.routes'));
 app.use('/api/contratos',       require('./routes/contratos.routes'));
 app.use('/api/puntos-red',      require('./routes/puntosRed.routes'));
 app.use('/api/notificaciones',  require('./routes/notificaciones.routes'));

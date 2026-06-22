@@ -24,6 +24,7 @@ model Sede {
   envios             Envio[]             @relation("EnvioDestino")
   enviosOrigen       Envio[]             @relation("EnvioOrigen")
   olts               Olt[]
+  equiposCabecera    EquipoCabecera[]
   onusList           Onu[]
   onusRecicladas     OnuReciclada[]
   ordenes            OrdenServicio[]
@@ -321,6 +322,26 @@ model Olt {
   @@unique([nombre, sedeId])
   @@unique([direccionIp, puertoSsh, sedeId])
   @@map("olts")
+}
+
+// Inventario simple de equipos de cabecera (Mikrotik, switch, router, etc.)
+// Distinto de Olt: no requiere fabricante/modelo/puertos de protocolo ni test
+// de conexión — es solo registro de inventario y credenciales para consulta.
+model EquipoCabecera {
+  id            String    @id @default(uuid())
+  nombre        String    @db.VarChar(150)
+  tipo          String    @db.VarChar(30) // OLT | MIKROTIK | SWITCH | ROUTER | OTRO
+  direccionIp   String?   @db.VarChar(45)
+  usuario       String?   @db.VarChar(100)
+  passwordHash  String?   @db.VarChar(256) // cifrado reversible, igual que Olt.passwordHash
+  notas         String?   @db.Text
+  sedeId        String
+  activo        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sede          Sede      @relation(fields: [sedeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("equipos_cabecera")
 }
 
 model PuntoRed {
