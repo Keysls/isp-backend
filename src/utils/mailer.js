@@ -9,7 +9,7 @@
  *   MAIL_PORT       587
  *   MAIL_USER       tucuenta@gmail.com
  *   MAIL_PASS       xxxx xxxx xxxx xxxx   ← App Password (Gmail) o contraseña normal
- *   MAIL_FROM       "Enet Fiber Perú Alertas <tucuenta@gmail.com>"
+ *   MAIL_FROM       "EnetFiber Alertas <tucuenta@gmail.com>"
  *   MAIL_ALERT_TO   encargado@empresa.com  (puede ser varios separados por coma)
  */
 
@@ -108,7 +108,7 @@ function baseTemplate({ titulo, subtitulo, color, filas, nota }) {
 
     <!-- Footer -->
     <div style="background:#f9fafb;padding:16px 28px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;text-align:center;">
-      Enet Fiber Perú · Sistema de gestión ISP · ${new Date().toLocaleDateString('es-PE', { day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+      EnetFiber · Sistema de gestión ISP · ${new Date().toLocaleDateString('es-PE', { day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' })}
     </div>
   </div>
 </body>
@@ -198,4 +198,76 @@ async function notificacionIngresoStock(productos, sedeNombre, registradoPor, co
   });
 }
 
-module.exports = { enviarCorreo, alertaStockBajo, notificacionIngresoStock, umbralAlerta };
+// ── REQUERIMIENTO: solicitud de stock enviada por un admin de sede ──────────
+/**
+ * @param {Array<{nombre: string, cantidadSolicitada: number, stockActual: number}>} productos
+ * @param {string} sedeNombre
+ * @param {string} to                 correo receptor configurado en la sede
+ * @param {string|null} solicitadoPor nombre del usuario que generó el requerimiento
+ * @param {string|null} nota
+ */
+async function notificacionRequerimiento(productos, sedeNombre, to, solicitadoPor, nota) {
+  if (!to || productos.length === 0) return;
+
+  const filas = productos.map(p => ({
+    producto:   p.nombre,
+    stock:      `pide ${p.cantidadSolicitada} (actual: ${p.stockActual})`,
+    stockColor: p.stockActual === 0 ? '#DC2626' : '#111827',
+    estado:     p.stockActual === 0
+      ? '<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">SIN STOCK</span>'
+      : '<span style="background:#DBEAFE;color:#1E40AF;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">SOLICITADO</span>',
+  }));
+
+  const extra = [
+    solicitadoPor ? `Solicitado por: <strong>${solicitadoPor}</strong>` : null,
+    nota          ? `Nota: <em>${nota}</em>` : null,
+  ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+
+  await enviarCorreo({
+    to,
+    subject: `📦 Requerimiento de stock — ${sedeNombre} (${productos.length} producto${productos.length !== 1 ? 's' : ''})`,
+    html: baseTemplate({
+      titulo:    `Requerimiento de stock — ${sedeNombre}`,
+      subtitulo: `${productos.length} producto${productos.length !== 1 ? 's' : ''} solicitado${productos.length !== 1 ? 's' : ''}`,
+      color:     '#2563EB',
+      filas,
+      nota: extra || null,
+    }),
+  });
+}
+
+// ── Envío con credenciales propias de la sede ────────────────────────────────
+/**
+ * Crea un transporter temporal con las credenciales SMTP de la sede
+ * (correoEmisor + correoEmisorPass ya descifrada) y envía el correo.
+ * Si falla, lanza el error (el caller decide si lo traga o lo propaga).
+ */
+async function enviarCorreoConSede({ from, password, to, subject, html }) {
+  if (!from || !password || !to) {
+    console.warn('[mailer] Faltan credenciales de sede para enviar correo');
+    return;
+  }
+
+  // Detectar host SMTP a partir del dominio del correo emisor
+  const dominio = from.split('@')[1]?.toLowerCase() || '';
+  let host = process.env.MAIL_HOST || 'smtp.gmail.com';
+  let port = Number(process.env.MAIL_PORT) || 587;
+
+  if (dominio.includes('gmail'))     { host = 'smtp.gmail.com';      port = 587; }
+  else if (dominio.includes('outlook') || dominio.includes('hotmail') || dominio.includes('live'))
+                                     { host = 'smtp.office365.com';  port = 587; }
+  else if (dominio.includes('yahoo')) { host = 'smtp.mail.yahoo.com'; port = 587; }
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user: from, pass: password },
+    tls:  { rejectUnauthorized: false },
+  });
+
+  await transporter.sendMail({ from, to, subject, html });
+  console.log(`[mailer] Correo enviado (sede) ${from} → ${to} | ${subject}`);
+}
+
+module.exports = { enviarCorreo, enviarCorreoConSede, alertaStockBajo, notificacionIngresoStock, notificacionRequerimiento, umbralAlerta, baseTemplate };

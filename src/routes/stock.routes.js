@@ -43,5 +43,7 @@ router.post('/recojos/:id/revisar',        requireRol('SUPERADMIN', 'ADMIN'),   
 // BUG 7 FIX: nuevo endpoint para auditoria de equipos malogrados
 router.get('/malogrados',                  requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), listarMalogrados);
 router.post('/malogrados/:id/reingresar',  requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), reingresarOnuMalograda);
-
+router.get('/onus-salida-directa',                 requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), ctrl.listarOnusSalidaDirecta);
+router.post('/onus-salida-directa/:id/reingresar', requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), ctrl.reingresarOnuSalidaDirecta);
+router.post('/requerimiento-correo',               requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), ctrl.enviarRequerimientoCorreo);
 module.exports = router;

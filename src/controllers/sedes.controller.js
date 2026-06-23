@@ -90,7 +90,7 @@ const crear = async (req, res, next) => {
 // PUT /api/sedes/:id — solo SUPERADMIN
 const actualizar = async (req, res, next) => {
   try {
-    const { nombre, ciudad, activo, esPrincipal, puedeEnviarStock } = req.body;
+    const { nombre, ciudad, activo, esPrincipal, puedeEnviarStock, correoReceptor, correoEmisor, correoEmisorPass } = req.body;
 
     const sede = await prisma.$transaction(async (tx) => {
       const actual = await tx.sede.findUnique({ where: { id: req.params.id } });
@@ -123,7 +123,9 @@ const actualizar = async (req, res, next) => {
           ...(activo           !== undefined && { activo }),
           ...(esPrincipal      === true      && { esPrincipal:     true }),
           ...(puedeEnviarStock !== undefined && { puedeEnviarStock }),
-        },
+          ...(correoReceptor   !== undefined && { correoReceptor: correoReceptor?.trim() || null }),
+          ...(correoEmisor     !== undefined && { correoEmisor: correoEmisor?.trim() || null }),
+          ...(correoEmisorPass !== undefined && { correoEmisorPass: correoEmisorPass ? require('./olt/encryption').encrypt(correoEmisorPass) : null }),        },
       });
     });
 

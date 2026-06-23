@@ -1,4 +1,6 @@
 const prisma = require('../utils/prisma');
+const { notificacionRequerimiento, enviarCorreoConSede, baseTemplate } = require('../utils/mailer');
+const { decrypt } = require('./olt/encryption');
 const { verificarYAlertarStockBajo, notificarIngreso } = require('../utils/stockAlertas');
 const { notificarEnvioPendiente, verificarAlertaStock } = require('../services/notificaciones.service');
 
@@ -532,6 +534,15 @@ const confirmarEnvio = async (req, res, next) => {
     });
 
     res.json({ ok: true, message: 'Envío confirmado correctamente' });
+
+    // Correo: notificar ingreso si la sede destino es la sede principal
+    notificarIngreso(envio.sedeId, envio.detalles.map(d => ({
+      productoId: d.productoId,
+      cantidad:   Number(d.cantidad),
+    })), {
+      usuarioId:  req.usuario?.id,
+      comentario: `Recepción de envío guía: ${envio.guia || envio.id}`,
+    }).catch(() => {});
 
   } catch (err) { next(err); }
 };
@@ -1444,12 +1455,12 @@ const registrarRetiro = async (req, res, next) => {
             });
 
             if (onuExistente) {
-                // Reasignar al técnico que la recogió y limpiar cliente anterior
-                await tx.onu.update({
-                  where: { codigoPon: item.codigoPon },
-                  data:  { tecnicoId: tecnico.id, salidaDirecta: false, cliente: null },
-                });
-              } else {
+              // Reasignar al técnico que la recogió y limpiar el cliente anterior
+              await tx.onu.update({
+                where: { codigoPon: item.codigoPon },
+                data:  { tecnicoId: tecnico.id, salidaDirecta: false, cliente: null },
+              });
+            } else {
               // ONU nueva en el sistema (nunca estuvo registrada)
               await tx.onu.create({
                 data: {
@@ -1491,6 +1502,171 @@ const catalogoTecnico = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── GET /api/stock/onus-salida-directa ───────────────────────
+// Lista ONUs que salieron por "salida directa" (salidaDirecta=true,
+// sin tecnicoId, sin cliente) y por lo tanto pueden reingresarse al
+// stock disponible. Distinto de las ONUs malogradas (esas usan la
+// tabla onus_recicladas) — aquí son ONUs que simplemente se sacaron
+// del inventario manualmente (venta, baja, error, etc.) y vuelven.
+const listarOnusSalidaDirecta = async (req, res, next) => {
+  try {
+    const sedeId = getSedeId(req);
+    if (!sedeId) return res.status(400).json({ error: 'Debe indicar una sede' });
+
+    const onus = await prisma.onu.findMany({
+      where: {
+        sedeId,
+        salidaDirecta: true,
+        tecnicoId: null,
+        cliente: null,
+        codigoPon: { not: null },
+      },
+      include: { producto: { select: { nombre: true, codigo: true } } },
+      orderBy: { codigoPon: 'asc' },
+    });
+
+    res.json(onus.map(o => ({
+      id: o.id,
+      codigoPon: o.codigoPon,
+      productoId: o.productoId,
+      producto: o.producto?.nombre || null,
+      codigo: o.producto?.codigo || null,
+    })));
+  } catch (err) { next(err); }
+};
+
+// ── POST /api/stock/onus-salida-directa/:id/reingresar ───────
+// Revierte una ONU que salió por salida directa: vuelve a estar
+// disponible (salidaDirecta=false) y se suma de vuelta al stock de
+// la sede + al stock total del producto. Se registra una EntradaStock
+// para que quede trazabilidad de por qué volvió a aparecer el stock.
+const reingresarOnuSalidaDirecta = async (req, res, next) => {
+  try {
+    const onuId = Number(req.params.id);
+    const { comentario } = req.body || {};
+
+    const onu = await prisma.onu.findUnique({ where: { id: onuId } });
+    if (!onu) return res.status(404).json({ error: 'ONU no encontrada' });
+    if (!onu.salidaDirecta)
+      return res.status(400).json({ error: 'Esta ONU no está marcada como salida directa' });
+
+    await prisma.$transaction(async (tx) => {
+      await tx.onu.update({
+        where: { id: onuId },
+        data: { salidaDirecta: false },
+      });
+
+      await tx.stockSede.upsert({
+        where:  { sedeId_productoId: { sedeId: onu.sedeId, productoId: onu.productoId } },
+        create: { sedeId: onu.sedeId, productoId: onu.productoId, cantidad: 1 },
+        update: { cantidad: { increment: 1 } },
+      });
+
+      await tx.producto.update({
+        where: { id: onu.productoId },
+        data:  { stockTotal: { increment: 1 } },
+      });
+
+      await tx.entradaStock.create({
+        data: {
+          productoId:    onu.productoId,
+          cantidad:      1,
+          registradoPor: String(req.usuario.id),
+          sedeId:        onu.sedeId,
+          comentario:    `Reingreso de ONU tras salida directa` + (onu.codigoPon ? ` (${onu.codigoPon})` : '') + (comentario ? ` — ${comentario}` : ''),
+        },
+      });
+    });
+
+    res.json({ ok: true, message: 'ONU reingresada al stock correctamente' });
+  } catch (err) { next(err); }
+};
+
+// ── POST /api/stock/requerimiento-correo ─────────────────────
+// Envía por correo un requerimiento de productos: busca el correoReceptor
+// configurado en la sede (panel NOC > Sedes) y envía el detalle con
+// cantidad solicitada + stock actual de cada producto, vía SMTP.
+const enviarRequerimientoCorreo = async (req, res, next) => {
+  try {
+    const sedeId = getSedeId(req);
+    if (!sedeId) return res.status(400).json({ error: 'Debe indicar una sede' });
+
+    const { items, nota } = req.body;
+    if (!Array.isArray(items) || items.length === 0)
+      return res.status(400).json({ error: 'Debe incluir al menos un producto' });
+
+    const sede = await prisma.sede.findUnique({ where: { id: sedeId } });
+    if (!sede) return res.status(404).json({ error: 'Sede no encontrada' });
+    if (!sede.correoReceptor)
+      return res.status(400).json({ error: 'Esta sede no tiene un correo receptor configurado. Pídele a un Super Admin que lo agregue desde Sedes en el panel NOC.' });
+
+    // Cruzar con stock actual real (no confiar en lo que mande el cliente)
+    const productoIds = items.map(i => Number(i.producto_id)).filter(Boolean);
+    const stockActual = await prisma.stockSede.findMany({
+      where: { sedeId, productoId: { in: productoIds } },
+      include: { producto: { select: { nombre: true } } },
+    });
+    const stockPorProducto = new Map(stockActual.map(s => [s.productoId, s]));
+
+    const productos = items
+      .map(i => {
+        const productoId = Number(i.producto_id);
+        const cantidadSolicitada = Number(i.cantidad);
+        const s = stockPorProducto.get(productoId);
+        if (!s || !cantidadSolicitada || cantidadSolicitada <= 0) return null;
+        return {
+          nombre: s.producto?.nombre || `Producto #${productoId}`,
+          cantidadSolicitada,
+          stockActual: s.cantidad,
+        };
+      })
+      .filter(Boolean);
+
+    if (productos.length === 0)
+      return res.status(400).json({ error: 'Ningún producto válido para enviar' });
+
+    const solicitadoPor = req.usuario ? `${req.usuario.nombre || ''} ${req.usuario.apellido || ''}`.trim() : null;
+
+    // Si la sede tiene correo emisor propio, usarlo; si no, usar el global del .env
+    if (sede.correoEmisor && sede.correoEmisorPass) {
+      const password = decrypt(sede.correoEmisorPass);
+
+      const filas = productos.map(p => ({
+        producto:   p.nombre,
+        stock:      `pide ${p.cantidadSolicitada} (actual: ${p.stockActual})`,
+        stockColor: p.stockActual === 0 ? '#DC2626' : '#111827',
+        estado:     p.stockActual === 0
+          ? '<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">SIN STOCK</span>'
+          : '<span style="background:#DBEAFE;color:#1E40AF;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">SOLICITADO</span>',
+      }));
+
+      const extra = [
+        solicitadoPor ? `Solicitado por: <strong>${solicitadoPor}</strong>` : null,
+        nota?.trim()  ? `Nota: <em>${nota.trim()}</em>` : null,
+      ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+
+      await enviarCorreoConSede({
+        from:     sede.correoEmisor,
+        password,
+        to:       sede.correoReceptor,
+        subject:  `📦 Requerimiento de stock — ${sede.nombre} (${productos.length} producto${productos.length !== 1 ? 's' : ''})`,
+        html:     baseTemplate({
+          titulo:    `Requerimiento de stock — ${sede.nombre}`,
+          subtitulo: `${productos.length} producto${productos.length !== 1 ? 's' : ''} solicitado${productos.length !== 1 ? 's' : ''}`,
+          color:     '#2563EB',
+          filas,
+          nota: extra || null,
+        }),
+      });
+    } else {
+      // Fallback: usar el transporter global del .env
+      await notificacionRequerimiento(productos, sede.nombre, sede.correoReceptor, solicitadoPor || null, nota?.trim() || null);
+    }
+
+    res.json({ ok: true, message: `Correo enviado a ${sede.correoReceptor}` });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   verStock,
   catalogoTecnico,
@@ -1510,4 +1686,7 @@ module.exports = {
   miInventario,
   registrarConsumo,
   registrarRetiro,
+  listarOnusSalidaDirecta,
+  reingresarOnuSalidaDirecta,
+  enviarRequerimientoCorreo,
 };

@@ -17,6 +17,9 @@ model Sede {
   direccion          String?
   esPrincipal        Boolean             @default(false) @map("es_principal")
   puedeEnviarStock   Boolean             @default(false) @map("puede_enviar_stock")
+  correoReceptor     String?             @map("correo_receptor")
+  correoEmisor       String?             @map("correo_emisor")
+  correoEmisorPass   String?             @map("correo_emisor_pass")
   activos            Activo[]
   asignaciones       AsignacionTecnico[]
   contratos          Contrato[]
