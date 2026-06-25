@@ -1608,16 +1608,32 @@ const enviarRequerimientoCorreo = async (req, res, next) => {
     });
     const stockPorProducto = new Map(stockActual.map(s => [s.productoId, s]));
 
+    // Productos sin registro en stockSede (nunca tuvieron entrada en esta sede)
+    // — buscar su nombre en el catálogo para no perderlos del requerimiento.
+    const idsSinStock = productoIds.filter(id => !stockPorProducto.has(id));
+    const productosCatalogo = idsSinStock.length > 0
+      ? await prisma.producto.findMany({
+          where: { id: { in: idsSinStock } },
+          select: { id: true, nombre: true },
+        })
+      : [];
+    const nombrePorIdCatalogo = new Map(productosCatalogo.map(p => [p.id, p.nombre]));
+
     const productos = items
       .map(i => {
         const productoId = Number(i.producto_id);
         const cantidadSolicitada = Number(i.cantidad);
+        if (!cantidadSolicitada || cantidadSolicitada <= 0) return null;
+
         const s = stockPorProducto.get(productoId);
-        if (!s || !cantidadSolicitada || cantidadSolicitada <= 0) return null;
+        const nombre = s?.producto?.nombre
+          || nombrePorIdCatalogo.get(productoId)
+          || `Producto #${productoId}`;
+
         return {
-          nombre: s.producto?.nombre || `Producto #${productoId}`,
+          nombre,
           cantidadSolicitada,
-          stockActual: s.cantidad,
+          stockActual: s?.cantidad ?? 0,
         };
       })
       .filter(Boolean);
