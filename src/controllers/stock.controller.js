@@ -1314,6 +1314,10 @@ const registrarConsumo = async (req, res, next) => {
         productoId: Number(i.productoId), 
         cantidad:   Number(i.cantidad),
         codigoPon:  i.codigoPon || null,
+        // Cuántas de las unidades consumidas el técnico eligió que sean
+        // recicladas (de Recojo en_mano) — el resto se asume normal/asignado.
+        // Si no viene, se asume 0 (compatibilidad con clientes viejos).
+        unidadesRecicladas: Number(i.unidadesRecicladas) || 0,
       }));
 
     const registros = await Promise.all(
@@ -1343,6 +1347,15 @@ const registrarConsumo = async (req, res, next) => {
       const unidadesConsumidas = Math.floor(Number(item.cantidad));
       if (unidadesConsumidas <= 0) continue;
 
+      // El técnico elige explícitamente cuántas unidades de las consumidas son
+      // recicladas. Se limita por seguridad a no pedir más recicladas de las
+      // que realmente se consumieron en total.
+      const unidadesRecicladasPedidas = Math.min(
+        Math.floor(Number(item.unidadesRecicladas) || 0),
+        unidadesConsumidas
+      );
+      if (unidadesRecicladasPedidas <= 0) continue;
+
       const recojosDisponibles = await prisma.recojo.findMany({
         where: {
           tecnicoId:  tecnico.id,
@@ -1350,25 +1363,19 @@ const registrarConsumo = async (req, res, next) => {
           productoId: item.productoId,
         },
         select: { id: true },
-        take: unidadesConsumidas,
+        take: unidadesRecicladasPedidas,   // ← solo lo que el técnico eligió, no lo asumido
       });
 
       if (recojosDisponibles.length > 0) {
+        // Solo marcar el recojo como "entregado" (ya no está en_mano). NO se
+        // decrementa AsignacionTecnico aquí — el descuento real de disponibilidad
+        // ya lo cubre ConsumoTecnico vía (asignado - utilizado) en miInventario.
         await prisma.recojo.updateMany({
           where: { id: { in: recojosDisponibles.map(r => r.id) } },
           data: {
             estado:     'entregado',
             comentario: ordenId ? `Usado en orden: ${ordenId}` : 'Usado en servicio',
           },
-        });
-
-        await prisma.asignacionTecnico.updateMany({
-          where: {
-            tecnicoId:  tecnico.id,
-            productoId: item.productoId,
-            sedeId:     tecnico.sedeId,
-          },
-          data: { cantidad: { decrement: recojosDisponibles.length } },
         });
       }
     }
