@@ -3,74 +3,38 @@
 
 const ZteParsers = {
 
-  // ── Parsear ONUs no autorizadas ──────────────────────────────
-  // Replica ZteParsers.Parse() del .NET
-  // Input: output de "show gpon onu uncfg" o "show pon onu uncfg"
-  // ── C300 / C320 ──────────────────────────────────
-  // Formato: gpon-onu_1/3/7:1   HWTC8A100262   unknown
-  parseC300(output) {
+  // ── Parsear ONUs no autorizadas (uncfg) ──────────────────────
+  // Comando: "show pon onu uncfg" — mismo comando y mismas columnas
+  // para los 5 modelos (C300, C320, C600, C610, C620).
+  // Solo cambia el prefijo de interfaz:
+  //   C300/C320: gpon-olt_1/4/2
+  //   C600+:     gpon_olt-1/2/6
+  // Columnas siempre: OltIndex | Model | SN | PW
+  parsePendientes(output) {
     const resultado = [];
     if (!output) return resultado;
 
     for (const linea of output.split('\n')) {
       const l = linea.trim();
-      if (!l.startsWith('gpon-onu_')) continue;
-
-      const partes = l.split(/\s+/).filter(Boolean);
-      if (partes.length < 2) continue;
-
-      // partes[0] = "gpon-onu_1/3/7:1" → "1/3/7"
-      const indice = partes[0].replace('gpon-onu_', '').split(':')[0];
-      const segmentos = indice.split('/');
-      if (segmentos.length < 3) continue;
-
-      const [frame, tarjeta, puerto] = segmentos;
-      resultado.push({
-        numeroSerie: partes[1],
-        frame, tarjeta, puerto,
-        puertoCompleto: `${frame}/${tarjeta}/${puerto}`,
-        modelo: '',
-      });
-    }
-    return resultado;
-  },
-
-  // ── C600 / C610 / C620 ───────────────────────────
-  // Formato: gpon_olt-1/4/8   D110GWC   DC80E6933146   1234567890
-  parseC600(output) {
-    const resultado = [];
-    if (!output) return resultado;
-
-    for (const linea of output.split('\n')) {
-      const l = linea.trim();
-      if (!l.startsWith('gpon_olt-')) continue;
+      if (!/^gpon[-_]olt[-_]/i.test(l)) continue;
 
       const partes = l.split(/\s+/).filter(Boolean);
       if (partes.length < 3) continue;
 
-      // partes[0] = "gpon_olt-1/4/8" → "1/4/8"
-      const indice = partes[0].replace('gpon_olt-', '');
+      // partes[0] = "gpon-olt_1/4/2" o "gpon_olt-1/2/6" → "1/4/2"
+      const indice = partes[0].replace(/^gpon[-_]olt[-_]/i, '');
       const segmentos = indice.split('/');
       if (segmentos.length < 3) continue;
 
       const [frame, tarjeta, puerto] = segmentos;
       resultado.push({
-        numeroSerie: partes[2],     // SN
+        numeroSerie: partes[2],   // SN
+        modelo: partes[1],        // Model (puede ser "N/A")
         frame, tarjeta, puerto,
         puertoCompleto: `${frame}/${tarjeta}/${puerto}`,
-        modelo: partes[1],          // Model (ej: D110GWC)
       });
     }
     return resultado;
-  },
-
-  // ── Auto-detectar según modelo de OLT ────────────
-  parsePendientes(output, modeloNombre = 'C300') {
-    const m = (modeloNombre || '').toUpperCase();
-    if (['C600', 'C610', 'C620'].some(x => m.includes(x))) {
-      return this.parseC600(output);
-    }
-    return this.parseC300(output);
   },
 
   // ── Parsear IDs usados en un puerto ──────────────────────────

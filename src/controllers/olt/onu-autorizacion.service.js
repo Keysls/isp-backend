@@ -21,9 +21,8 @@ const { notificarOnuErrorOlt }                      = require('../../services/no
 const buscarSnEnOlts = async (olts, serialNumber) => {
   for (const olt of olts) {
     try {
-      const password   = decrypt(olt.passwordHash);
-      const esC600Plus = ['C600','C610','C620'].includes(olt.modelo.nombre.toUpperCase());
-      const comando    = esC600Plus ? 'show pon onu uncfg' : 'show gpon onu uncfg';
+      const password = decrypt(olt.passwordHash);
+      const comando   = 'show pon onu uncfg';
 
       console.log(`[OLT] Buscando SN ${serialNumber} en ${olt.nombre} (${olt.direccionIp}:${olt.puertoSsh})...`);
 
@@ -32,7 +31,7 @@ const buscarSnEnOlts = async (olts, serialNumber) => {
         ['terminal length 0', 'terminal page-break disable', comando]
       );
 
-      const pendientes = ZteParsers.parsePendientes(output, olt.modelo.nombre);
+      const pendientes = ZteParsers.parsePendientes(output);
       const encontrada = pendientes.find(p =>
         p.numeroSerie?.toUpperCase() === serialNumber.toUpperCase()
       );
