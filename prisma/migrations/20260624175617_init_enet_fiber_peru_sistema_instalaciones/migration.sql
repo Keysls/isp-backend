@@ -30,6 +30,9 @@ CREATE TABLE "sedes" (
     "direccion" TEXT,
     "es_principal" BOOLEAN NOT NULL DEFAULT false,
     "puede_enviar_stock" BOOLEAN NOT NULL DEFAULT false,
+    "correo_receptor" TEXT,
+    "correo_emisor" TEXT,
+    "correo_emisor_pass" TEXT,
 
     CONSTRAINT "sedes_pkey" PRIMARY KEY ("id")
 );
@@ -282,6 +285,23 @@ CREATE TABLE "olts" (
     "formatoOnuDefecto" VARCHAR(50) NOT NULL DEFAULT 'ZTE-F625',
 
     CONSTRAINT "olts_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "equipos_cabecera" (
+    "id" TEXT NOT NULL,
+    "nombre" VARCHAR(150) NOT NULL,
+    "tipo" VARCHAR(30) NOT NULL,
+    "direccionIp" VARCHAR(45),
+    "usuario" VARCHAR(100),
+    "passwordHash" VARCHAR(256),
+    "notas" TEXT,
+    "sedeId" TEXT NOT NULL,
+    "activo" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "equipos_cabecera_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -768,6 +788,9 @@ ALTER TABLE "olts" ADD CONSTRAINT "olts_modeloId_fkey" FOREIGN KEY ("modeloId") 
 
 -- AddForeignKey
 ALTER TABLE "olts" ADD CONSTRAINT "olts_sedeId_fkey" FOREIGN KEY ("sedeId") REFERENCES "sedes"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "equipos_cabecera" ADD CONSTRAINT "equipos_cabecera_sedeId_fkey" FOREIGN KEY ("sedeId") REFERENCES "sedes"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "puntos_red" ADD CONSTRAINT "puntos_red_sedeId_fkey" FOREIGN KEY ("sedeId") REFERENCES "sedes"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

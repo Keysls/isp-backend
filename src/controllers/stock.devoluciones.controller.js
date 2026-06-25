@@ -390,7 +390,7 @@ const aprobarDevolucion = async (req, res, next) => {
       if (onusDevueltas.length > 0) {
         await tx.onu.updateMany({
           where: { cliente: `devolucion_pendiente#${devolucionId}` },
-          data:  { cliente: null, sedeId: devolucion.sedeId },
+          data:  { cliente: `revision_pendiente#${devolucionId}`, sedeId: devolucion.sedeId },
         });
 
         for (const onu of onusDevueltas) {
@@ -471,15 +471,29 @@ const rechazarDevolucion = async (req, res, next) => {
       return res.status(400).json({ error: 'La devolucion ya fue procesada' });
 
     await prisma.$transaction(async (tx) => {
-      // Recojos vuelven a "en_mano"
-      await tx.recojo.updateMany({
+      // Recojos de retiro de cliente → vuelven a "en_mano"
+      // Recojos artificiales (de devolución de ONU asignada) → se eliminan
+      const recojosAsociados = await tx.recojo.findMany({
         where: {
           tecnicoId:  devolucion.tecnicoId,
           estado:     'en_revision',
           comentario: `Devuelto en devolucion #${devolucionId}`,
         },
-        data: { estado: 'en_mano', comentario: null },
       });
+      const recojosDeDev = recojosAsociados.filter(r => r.grupoOrden === null);
+      const recojosDeRetiro = recojosAsociados.filter(r => r.grupoOrden !== null);
+
+      if (recojosDeDev.length > 0) {
+        await tx.recojo.deleteMany({
+          where: { id: { in: recojosDeDev.map(r => r.id) } },
+        });
+      }
+      if (recojosDeRetiro.length > 0) {
+        await tx.recojo.updateMany({
+          where: { id: { in: recojosDeRetiro.map(r => r.id) } },
+          data: { estado: 'en_mano', comentario: null },
+        });
+      }
 
       // ONUs vuelven al tecnico
       await tx.onu.updateMany({
@@ -563,6 +577,14 @@ const revisarRecojo = async (req, res, next) => {
         // grupoOrden=null y comentario con "Devuelto en devolucion #...".
         const esDeRetiroCliente = recojo.grupoOrden !== null ||
           (recojo.comentario && !recojo.comentario.startsWith('Devuelto en devolucion'));
+
+          // Equipo de retiro de cliente: nunca estuvo en stockTotal → sumar
+        if (esDeRetiroCliente) {
+          await tx.producto.update({
+            where: { id: recojo.productoId },
+            data:  { stockTotal: { increment: 1 } },
+          });
+        }
 
         if (esDeRetiroCliente) {
           await tx.onuReciclada.create({
@@ -777,6 +799,21 @@ const reingresarOnuMalograda = async (req, res, next) => {
           create: { sedeId: malogrado.sedeId, productoId: malogrado.productoId, cantidad: 1 },
           update: { cantidad: { increment: 1 } },
         });
+
+        // Equipo de retiro de cliente: sumar al stock global
+        const recojoOrigen = malogrado.recojoId
+          ? await tx.recojo.findUnique({ where: { id: malogrado.recojoId }, select: { grupoOrden: true, comentario: true } })
+          : null;
+        const esDeRetiro = recojoOrigen && (
+          recojoOrigen.grupoOrden !== null ||
+          (recojoOrigen.comentario && !recojoOrigen.comentario.startsWith('Devuelto en devolucion'))
+        );
+        if (esDeRetiro) {
+          await tx.producto.update({
+            where: { id: malogrado.productoId },
+            data:  { stockTotal: { increment: 1 } },
+          });
+        }
 
         // 3. Registrar entrada de stock para auditoria
         await tx.entradaStock.create({
