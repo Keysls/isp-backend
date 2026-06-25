@@ -25,11 +25,11 @@ const buscarSnEnOlts = async (olts, serialNumber) => {
       const esC600Plus = ['C600','C610','C620'].includes(olt.modelo.nombre.toUpperCase());
       const comando    = esC600Plus ? 'show pon onu uncfg' : 'show gpon onu uncfg';
 
-      console.log(`[OLT] Buscando SN ${serialNumber} en ${olt.nombre} (${olt.direccionIp})...`);
+      console.log(`[OLT] Buscando SN ${serialNumber} en ${olt.nombre} (${olt.direccionIp}:${olt.puertoSsh})...`);
 
       const output = await runComandos(
         { ...olt, password },
-        ['terminal length 0', comando]
+        ['terminal length 0', 'terminal page-break disable', comando]
       );
 
       const pendientes = ZteParsers.parsePendientes(output, olt.modelo.nombre);
@@ -59,11 +59,11 @@ const calcularNextId = async (olt, password, tarjeta, puerto) => {
   const interfaz    = esC600Plus
     ? `gpon_olt-1/${tarjeta}/${puerto}`
     : `gpon-olt_1/${tarjeta}/${puerto}`;
-  const comando     = `show ${esC600Plus ? 'pon' : 'gpon'} onu state ${interfaz}`;
+  const comando     = `show gpon onu baseinfo ${interfaz}`;
 
   const output = await runComandos(
     { ...olt, password },
-    ['terminal length 0', comando]
+    ['terminal length 0', 'terminal page-break disable', comando]
   );
 
   // Parsear IDs usados

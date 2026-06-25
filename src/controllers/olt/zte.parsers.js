@@ -6,54 +6,71 @@ const ZteParsers = {
   // ── Parsear ONUs no autorizadas ──────────────────────────────
   // Replica ZteParsers.Parse() del .NET
   // Input: output de "show gpon onu uncfg" o "show pon onu uncfg"
-  parsePendientes(output, modeloNombre = 'C300') {
-    const esC600Plus = ['C600','C610','C620'].includes((modeloNombre || '').toUpperCase());
-    const resultado  = [];
-
+  // ── C300 / C320 ──────────────────────────────────
+  // Formato: gpon-onu_1/3/7:1   HWTC8A100262   unknown
+  parseC300(output) {
+    const resultado = [];
     if (!output) return resultado;
 
-    const lineas = output.split('\n');
+    for (const linea of output.split('\n')) {
+      const l = linea.trim();
+      if (!l.startsWith('gpon-onu_')) continue;
 
-    for (const linea of lineas) {
-      const trim = linea.trim();
-      if (!trim || trim.startsWith('OLT') || trim.startsWith('---') || trim.startsWith('Frame')) continue;
+      const partes = l.split(/\s+/).filter(Boolean);
+      if (partes.length < 2) continue;
 
-      // Formato C300: "gpon-onu_1/1/3:1  ZTEG1A2B3C4D  ZTE-F625  ..."
-      // Formato C600: "gpon_onu-1/1/3:1  ZTEG1A2B3C4D  ZTE-F625  ..."
-      const matchC300 = trim.match(/gpon-onu_\d+\/(\d+)\/(\d+):\d+\s+([A-Z0-9]{12,16})\s*(\S*)?/i);
-      const matchC600 = trim.match(/gpon_onu-\d+\/(\d+)\/(\d+):\d+\s+([A-Z0-9]{12,16})\s*(\S*)?/i);
+      // partes[0] = "gpon-onu_1/3/7:1" → "1/3/7"
+      const indice = partes[0].replace('gpon-onu_', '').split(':')[0];
+      const segmentos = indice.split('/');
+      if (segmentos.length < 3) continue;
 
-      // También parsear el formato tabular simple: "1/1  1/3  ZTEG1A2B3C4D  ZTE-F625"
-      const matchTabular = trim.match(/^(\d+)\s+(\d+\/\d+)\s+([A-Z0-9]{12,16})\s*(\S*)?/i);
-
-      let tarjeta, puerto, numeroSerie, modelo;
-
-      if (matchC300 || matchC600) {
-        const m = matchC300 || matchC600;
-        tarjeta     = m[1];
-        puerto      = m[2];
-        numeroSerie = m[3];
-        modelo      = m[4] || '';
-      } else if (matchTabular) {
-        const partesPuerto = matchTabular[2].split('/');
-        tarjeta     = partesPuerto[0];
-        puerto      = partesPuerto[1];
-        numeroSerie = matchTabular[3];
-        modelo      = matchTabular[4] || '';
-      } else {
-        continue;
-      }
-
+      const [frame, tarjeta, puerto] = segmentos;
       resultado.push({
-        numeroSerie,
-        tarjeta,
-        puerto,
-        puertoCompleto: `${tarjeta}/${puerto}`,
-        modelo:         modelo.trim(),
+        numeroSerie: partes[1],
+        frame, tarjeta, puerto,
+        puertoCompleto: `${frame}/${tarjeta}/${puerto}`,
+        modelo: '',
       });
     }
-
     return resultado;
+  },
+
+  // ── C600 / C610 / C620 ───────────────────────────
+  // Formato: gpon_olt-1/4/8   D110GWC   DC80E6933146   1234567890
+  parseC600(output) {
+    const resultado = [];
+    if (!output) return resultado;
+
+    for (const linea of output.split('\n')) {
+      const l = linea.trim();
+      if (!l.startsWith('gpon_olt-')) continue;
+
+      const partes = l.split(/\s+/).filter(Boolean);
+      if (partes.length < 3) continue;
+
+      // partes[0] = "gpon_olt-1/4/8" → "1/4/8"
+      const indice = partes[0].replace('gpon_olt-', '');
+      const segmentos = indice.split('/');
+      if (segmentos.length < 3) continue;
+
+      const [frame, tarjeta, puerto] = segmentos;
+      resultado.push({
+        numeroSerie: partes[2],     // SN
+        frame, tarjeta, puerto,
+        puertoCompleto: `${frame}/${tarjeta}/${puerto}`,
+        modelo: partes[1],          // Model (ej: D110GWC)
+      });
+    }
+    return resultado;
+  },
+
+  // ── Auto-detectar según modelo de OLT ────────────
+  parsePendientes(output, modeloNombre = 'C300') {
+    const m = (modeloNombre || '').toUpperCase();
+    if (['C600', 'C610', 'C620'].some(x => m.includes(x))) {
+      return this.parseC600(output);
+    }
+    return this.parseC300(output);
   },
 
   // ── Parsear IDs usados en un puerto ──────────────────────────
@@ -62,23 +79,11 @@ const ZteParsers = {
     if (!output) return [];
 
     const idsUsados = [];
-    const lineas    = output.split('\n');
-
-    for (const linea of lineas) {
-      const trim = linea.trim();
-
-      // Buscar líneas con ONU-ID: " 1  ZTEG...  Online  ..."
-      // o "gpon-onu_1/1/3:5  ..."
-      const matchId = trim.match(/^(\d+)\s+[A-Z0-9]/i);
-      const matchPort = trim.match(/gpon[-_]onu[-_]\d+\/\d+\/\d+:(\d+)/i);
-
-      if (matchId) {
-        const id = parseInt(matchId[1]);
-        if (!isNaN(id) && id >= 1 && id <= 128) idsUsados.push(id);
-      } else if (matchPort) {
-        const id = parseInt(matchPort[1]);
-        if (!isNaN(id) && id >= 1 && id <= 128) idsUsados.push(id);
-      }
+    const regex = /gpon[-_]onu[\w\/-]*:(\d+)/gi;
+    let match;
+    while ((match = regex.exec(output)) !== null) {
+      const id = parseInt(match[1], 10);
+      if (!isNaN(id) && id >= 1 && id <= 128) idsUsados.push(id);
     }
 
     return [...new Set(idsUsados)].sort((a, b) => a - b);

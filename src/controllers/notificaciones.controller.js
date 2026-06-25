@@ -9,18 +9,21 @@ const listar = async (req, res, next) => {
 
     // SUPERADMIN / OPERADOR_NOC sin sedeId: excluir notificaciones de tipo
     // ENVIO_PENDIENTE_RECEPCION y STOCK_BAJO/CRITICO que son solo para admins de sede
-    const tiposExcluidosNoc   = ['ENVIO_PENDIENTE_RECEPCION', 'STOCK_BAJO', 'STOCK_CRITICO'];
-      const tiposExcluidosAdmin = ['ONU_ERROR_OLT', 'ORDEN_PENDIENTE_WAN'];
-      const esNoc   = ['SUPERADMIN', 'OPERADOR_NOC'].includes(rol) && !sedeId;
-      const esAdmin = rol === 'ADMIN';
+    const tiposExcluidosNoc       = ['ENVIO_PENDIENTE_RECEPCION', 'STOCK_BAJO', 'STOCK_CRITICO'];
+    const tiposExcluidosAdmin     = ['ONU_ERROR_OLT', 'ORDEN_PENDIENTE_WAN'];
+    const tiposExcluidosSecretaria = ['ENVIO_PENDIENTE_RECEPCION', 'STOCK_BAJO', 'STOCK_CRITICO'];
+    const esNoc        = ['SUPERADMIN', 'OPERADOR_NOC'].includes(rol) && !sedeId;
+    const esAdmin       = rol === 'ADMIN';
+    const esSecretaria  = rol === 'SECRETARIA';
 
-      const items = await prisma.notificacion.findMany({
-        where: {
-          leida: false,
-          ...(sedeId   && { sedeId }),
-          ...(esNoc    && { tipo: { notIn: tiposExcluidosNoc } }),
-          ...(esAdmin  && { tipo: { notIn: tiposExcluidosAdmin } }),
-        },
+    const items = await prisma.notificacion.findMany({
+      where: {
+        leida: false,
+        ...(sedeId      && { sedeId }),
+        ...(esNoc       && { tipo: { notIn: tiposExcluidosNoc } }),
+        ...(esAdmin     && { tipo: { notIn: tiposExcluidosAdmin } }),
+        ...(esSecretaria && { tipo: { notIn: tiposExcluidosSecretaria } }),
+      },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
