@@ -80,6 +80,7 @@ const crear = async (req, res, next) => {
       where: {
         direccionIp: direccionIp.trim(),
         puertoSsh:   Number(puertoSsh),
+        sedeId,
       },
     });
     if (existe) return res.status(409).json({
@@ -145,6 +146,7 @@ const actualizar = async (req, res, next) => {
         where: {
           direccionIp: (direccionIp ?? oltActual.direccionIp).trim(),
           puertoSsh:   Number(puertoSsh ?? oltActual.puertoSsh),
+          sedeId:      oltActual.sedeId,
           NOT: { id },
         },
       });
