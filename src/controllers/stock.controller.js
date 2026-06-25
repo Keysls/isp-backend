@@ -1330,44 +1330,51 @@ const registrarConsumo = async (req, res, next) => {
       }))
     );
  
-    // ── Marcar recojos como "usado" si el producto consumido era un recojo en_mano ──
-    // Si el técnico usó un producto que tenía como recojo, ese recojo ya no está disponible
-    // ── Marcar recojos como consumidos y descontar de asignacionTecnico ──
-const productosConsumidos = itemsNormalizados.map(i => i.productoId);
-if (productosConsumidos.length > 0) {
-  // Buscar recojos en_mano de estos productos
-  const recojosAfectados = await prisma.recojo.findMany({
-    where: {
-      tecnicoId:  tecnico.id,
-      estado:     'en_mano',
-      productoId: { in: productosConsumidos },
-    },
-    select: { id: true, productoId: true },
-  });
 
-  if (recojosAfectados.length > 0) {
-    // Marcar como entregado (estado válido en el schema)
-    await prisma.recojo.updateMany({
-      where: { id: { in: recojosAfectados.map(r => r.id) } },
-      data: {
-        estado:     'entregado',
-        comentario: ordenId ? `Usado en orden: ${ordenId}` : 'Usado en servicio',
-      },
-    });
 
-    // Descontar de asignacionTecnico por cada recojo consumido
-    for (const recojo of recojosAfectados) {
-      await prisma.asignacionTecnico.updateMany({
+
+// ── Marcar recojos como consumidos — SOLO 1 recojo por cada UNIDAD consumida ──
+    // BUG CORREGIDO: la versión anterior buscaba TODOS los recojos en_mano de ese
+    // productoId (sin límite) y descontaba -1 de asignacionTecnico por cada uno
+    // encontrado, sin importar cuántas unidades reales se consumieron. Con 2 recojos
+    // en_mano y solo 1 unidad consumida, descontaba -2 en vez de -1 y marcaba los
+    // 2 recojos como "entregado" (el segundo sin haberse usado realmente).
+    for (const item of itemsNormalizados) {
+      const unidadesConsumidas = Math.floor(Number(item.cantidad));
+      if (unidadesConsumidas <= 0) continue;
+
+      const recojosDisponibles = await prisma.recojo.findMany({
         where: {
           tecnicoId:  tecnico.id,
-          productoId: recojo.productoId,
-          sedeId:     tecnico.sedeId,
+          estado:     'en_mano',
+          productoId: item.productoId,
         },
-        data: { cantidad: { decrement: 1 } },
+        select: { id: true },
+        take: unidadesConsumidas,
       });
+
+      if (recojosDisponibles.length > 0) {
+        await prisma.recojo.updateMany({
+          where: { id: { in: recojosDisponibles.map(r => r.id) } },
+          data: {
+            estado:     'entregado',
+            comentario: ordenId ? `Usado en orden: ${ordenId}` : 'Usado en servicio',
+          },
+        });
+
+        await prisma.asignacionTecnico.updateMany({
+          where: {
+            tecnicoId:  tecnico.id,
+            productoId: item.productoId,
+            sedeId:     tecnico.sedeId,
+          },
+          data: { cantidad: { decrement: recojosDisponibles.length } },
+        });
+      }
     }
-  }
-}
+
+
+
 
     // ── Desvincular ONUs instaladas en cliente ─────────────────
     const itemsConPon = items.filter(i => i.codigoPon);

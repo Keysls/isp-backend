@@ -651,7 +651,7 @@ const revisarRecojo = async (req, res, next) => {
         if (recojo.codigoPon) {
           await tx.onu.updateMany({
             where: { codigoPon: recojo.codigoPon },
-            data:  { tecnicoId: null, salidaDirecta: true },
+            data:  { tecnicoId: null, salidaDirecta: true, cliente: null },
           });
         }
       }
@@ -785,10 +785,14 @@ const reingresarOnuMalograda = async (req, res, next) => {
 
     await prisma.$transaction(async (tx) => {
       // 1. Reactivar la ONU (si tiene codigo PON)
+      // IMPORTANTE: limpiar también "cliente" — puede tener un residuo como
+      // "revision_pendiente#X" si la ONU vino de una devolucion antes de ser
+      // marcada como malograda. Sin esto la ONU queda invisible/no disponible
+      // aunque tecnicoId y salidaDirecta ya estén en su valor correcto.
       if (malogrado.codigoPon) {
         await tx.onu.updateMany({
           where: { codigoPon: malogrado.codigoPon },
-          data:  { salidaDirecta: false, tecnicoId: null, sedeId: malogrado.sedeId },
+          data:  { salidaDirecta: false, tecnicoId: null, cliente: null, sedeId: malogrado.sedeId },
         });
       }
 
