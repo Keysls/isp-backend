@@ -1362,19 +1362,66 @@ const registrarConsumo = async (req, res, next) => {
         unidadesRecicladas: Number(i.unidadesRecicladas) || 0,
       }));
 
+    // ── Validar y resolver recojos ANTES de crear los ConsumoTecnico ──
+    // CRÍTICO: este cálculo debe ocurrir antes de crear los registros de
+    // consumo, porque calcula "yaUtilizado" sumando ConsumoTecnico existente.
+    // Si se calculara después de crear los registros de este mismo consumo,
+    // se contaría el consumo actual como "ya gastado previamente", forzando
+    // incorrectamente el uso de reciclados aunque el stock normal alcanzara
+    // (bug real detectado: con 1 normal + 1 reciclado, al consumir 1 con el
+    // checkbox desmarcado, el cálculo creía que ya no quedaba nada normal
+    // y gastaba el reciclado en vez del normal).
+    const recojosAMarcarPorItem = [];
+    for (const item of itemsNormalizados) {
+      const unidadesConsumidas = Math.floor(Number(item.cantidad));
+      if (unidadesConsumidas <= 0) continue;
+      if (item.codigoPon) continue; // ONUs no usan este flujo de recojos por cantidad
+
+      const asignacion = await prisma.asignacionTecnico.findFirst({
+        where: { tecnicoId: tecnico.id, productoId: item.productoId },
+        select: { cantidad: true },
+      });
+      const asignado = Number(asignacion?.cantidad || 0);
+
+      const utilizadoPrevio = await prisma.consumoTecnico.aggregate({
+        where: { tecnicoId: tecnico.id, productoId: item.productoId },
+        _sum: { cantidad: true },
+      });
+      const yaUtilizado = Number(utilizadoPrevio._sum.cantidad || 0);
+
+      const recojosEnManoCount = await prisma.recojo.count({
+        where: { tecnicoId: tecnico.id, estado: 'en_mano', productoId: item.productoId },
+      });
+
+      const disponibleNormal = Math.max(0, asignado - yaUtilizado - recojosEnManoCount);
+      const totalDisponible = disponibleNormal + recojosEnManoCount;
+      if (unidadesConsumidas > totalDisponible) {
+        throw new Error(`Stock insuficiente para producto ID ${item.productoId}: disponible ${totalDisponible}, solicitado ${unidadesConsumidas}`);
+      }
+
+      const faltanteNormal = Math.max(0, unidadesConsumidas - disponibleNormal);
+      const unidadesRecicladasPedidas = Math.max(
+        Math.min(Math.floor(Number(item.unidadesRecicladas) || 0), unidadesConsumidas),
+        faltanteNormal
+      );
+      if (unidadesRecicladasPedidas > 0) {
+        recojosAMarcarPorItem.push({ productoId: item.productoId, cantidad: unidadesRecicladasPedidas });
+      }
+    }
+
     const registros = await Promise.all(
-  itemsNormalizados.map(i => prisma.consumoTecnico.create({
-    data: {
-      tecnicoId:   tecnico.id,
-      sedeId:      tecnico.sedeId,
-      productoId:  i.productoId,
-      cantidad:    i.cantidad,
-      motivo:      motivo || 'SERVICIO',
-      descripcion: descripcion || (ordenId ? `Orden: ${ordenId}` : null),
-      codigoPon:   i.codigoPon || null,
-    },
-  }))
-);
+      itemsNormalizados.map(i => prisma.consumoTecnico.create({
+        data: {
+          tecnicoId:   tecnico.id,
+          sedeId:      tecnico.sedeId,
+          productoId:  i.productoId,
+          cantidad:    i.cantidad,
+          motivo:      motivo || 'SERVICIO',
+          descripcion: descripcion || (ordenId ? `Orden: ${ordenId}` : null),
+          codigoPon:   i.codigoPon || null,
+        },
+      }))
+    );
 
 // Restar de stockTotal SOLO para productos no-ONU (las ONUs no usan stockTotal
 // de esta forma — su disponibilidad se calcula por filas de la tabla Onu).
@@ -1399,62 +1446,16 @@ for (const item of itemsNormalizados) {
 
 
 
-// ── Marcar recojos como consumidos — SOLO 1 recojo por cada UNIDAD consumida ──
-    // BUG CORREGIDO: la versión anterior buscaba TODOS los recojos en_mano de ese
-    // productoId (sin límite) y descontaba -1 de asignacionTecnico por cada uno
-    // encontrado, sin importar cuántas unidades reales se consumieron. Con 2 recojos
-    // en_mano y solo 1 unidad consumida, descontaba -2 en vez de -1 y marcaba los
-    // 2 recojos como "entregado" (el segundo sin haberse usado realmente).
-    for (const item of itemsNormalizados) {
-      const unidadesConsumidas = Math.floor(Number(item.cantidad));
-      if (unidadesConsumidas <= 0) continue;
-      if (item.codigoPon) continue; // ONUs no usan este flujo de recojos por cantidad
-
-      // Stock no-reciclado real disponible: asignado - utilizado_previo
-      // (sin contar reciclados en_mano). Si el checkbox dice "no reciclado"
-      // pero ya no queda stock normal, el sistema fuerza usar reciclados —
-      // así nunca queda un Recojo huérfano mientras el numérico llega a 0.
-      const asignacion = await prisma.asignacionTecnico.findFirst({
-        where: { tecnicoId: tecnico.id, productoId: item.productoId },
-        select: { cantidad: true },
-      });
-      const asignado = Number(asignacion?.cantidad || 0);
-
-      const utilizadoPrevio = await prisma.consumoTecnico.aggregate({
-        where: { tecnicoId: tecnico.id, productoId: item.productoId },
-        _sum: { cantidad: true },
-      });
-      const yaUtilizado = Number(utilizadoPrevio._sum.cantidad || 0);
-
-      const recojosEnManoCount = await prisma.recojo.count({
-        where: { tecnicoId: tecnico.id, estado: 'en_mano', productoId: item.productoId },
-      });
-
-      // Validación dura: no se puede consumir más de lo que realmente existe
-      // (asignado normal restante + reciclados en mano).
-      const disponibleNormal = Math.max(0, asignado - yaUtilizado - recojosEnManoCount);
-      const totalDisponible = disponibleNormal + recojosEnManoCount;
-      if (unidadesConsumidas > totalDisponible) {
-        throw new Error(`Stock insuficiente para producto ID ${item.productoId}: disponible ${totalDisponible}, solicitado ${unidadesConsumidas}`);
-      }
-
-      // Si lo normal no alcanza, se completa automáticamente con reciclados,
-      // sin importar lo que haya marcado el checkbox.
-      const faltanteNormal = Math.max(0, unidadesConsumidas - disponibleNormal);
-      const unidadesRecicladasPedidas = Math.max(
-        Math.min(Math.floor(Number(item.unidadesRecicladas) || 0), unidadesConsumidas),
-        faltanteNormal
-      );
-      if (unidadesRecicladasPedidas <= 0) continue;
-
+// ── Marcar recojos como consumidos — usando lo ya validado ANTES de crear los consumos ──
+    for (const { productoId, cantidad } of recojosAMarcarPorItem) {
       const recojosDisponibles = await prisma.recojo.findMany({
         where: {
           tecnicoId:  tecnico.id,
           estado:     'en_mano',
-          productoId: item.productoId,
+          productoId,
         },
         select: { id: true },
-        take: unidadesRecicladasPedidas,
+        take: cantidad,
       });
 
       if (recojosDisponibles.length > 0) {
