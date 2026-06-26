@@ -1321,18 +1321,38 @@ const registrarConsumo = async (req, res, next) => {
       }));
 
     const registros = await Promise.all(
-      itemsNormalizados.map(i => prisma.consumoTecnico.create({
-        data: {
-          tecnicoId:   tecnico.id,
-          sedeId:      tecnico.sedeId,
-          productoId:  i.productoId,
-          cantidad:    i.cantidad,
-          motivo:      motivo || 'SERVICIO',
-          descripcion: descripcion || (ordenId ? `Orden: ${ordenId}` : null),
-          codigoPon:   i.codigoPon || null,  // ← AGREGAR
-        },
-      }))
-    );
+  itemsNormalizados.map(i => prisma.consumoTecnico.create({
+    data: {
+      tecnicoId:   tecnico.id,
+      sedeId:      tecnico.sedeId,
+      productoId:  i.productoId,
+      cantidad:    i.cantidad,
+      motivo:      motivo || 'SERVICIO',
+      descripcion: descripcion || (ordenId ? `Orden: ${ordenId}` : null),
+      codigoPon:   i.codigoPon || null,
+    },
+  }))
+);
+
+// Restar de stockTotal SOLO para productos no-ONU (las ONUs no usan stockTotal
+// de esta forma — su disponibilidad se calcula por filas de la tabla Onu).
+// Esto hace que el ciclo sea simétrico: al consumir/instalar sale de stockTotal;
+// si luego se recoge (cambio de equipo, retiro de baja), siempre es correcto
+// sumarlo de vuelta — ya no hace falta inferir si "ya estaba contado".
+for (const item of itemsNormalizados) {
+  const producto = await prisma.producto.findUnique({
+    where: { id: item.productoId },
+    select: { categoria: true, nombre: true },
+  });
+  const esOnu = `${producto?.categoria || ''} ${producto?.nombre || ''}`.toLowerCase().includes('onu')
+    || `${producto?.categoria || ''} ${producto?.nombre || ''}`.toLowerCase().includes('ont');
+  if (!esOnu) {
+    await prisma.producto.updateMany({
+      where: { id: item.productoId, stockTotal: { gte: item.cantidad } },
+      data:  { stockTotal: { decrement: item.cantidad } },
+    });
+  }
+}
  
 
 

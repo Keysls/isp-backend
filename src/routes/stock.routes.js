@@ -10,6 +10,7 @@ const {
   revisarRecojo,
   listarMalogrados,
   reingresarOnuMalograda,
+  revisarDetalleDevolucion,
 } = require('../controllers/stock.devoluciones.controller');
 
 
@@ -45,5 +46,6 @@ router.get('/malogrados',                  requireRol('SUPERADMIN', 'OPERADOR_NO
 router.post('/malogrados/:id/reingresar',  requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), reingresarOnuMalograda);
 router.get('/onus-salida-directa',                 requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), ctrl.listarOnusSalidaDirecta);
 router.post('/onus-salida-directa/:id/reingresar', requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), ctrl.reingresarOnuSalidaDirecta);
+router.post('/devoluciones/detalle/:id/revisar', requireRol('SUPERADMIN', 'ADMIN'), revisarDetalleDevolucion);
 router.post('/requerimiento-correo',               requireRol('SUPERADMIN', 'OPERADOR_NOC', 'ADMIN'), ctrl.enviarRequerimientoCorreo);
 module.exports = router;

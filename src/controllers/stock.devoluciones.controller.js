@@ -204,10 +204,15 @@ const misDevoluciones = async (req, res, next) => {
         fecha:         d.createdAt,
         fechaRevision: d.fechaRevision,
         detalles: d.detalles.map(det => ({
-          productoId: det.productoId,
-          nombre:     det.producto.nombre,
-          unidad:     det.producto.unidad,
-          cantidad:   Number(det.cantidad),
+          id:            det.id,
+          productoId:    det.productoId,
+          nombre:        det.producto.nombre,
+          unidad:        det.producto.unidad,
+          cantidad:      Number(det.cantidad),
+          estado:        det.estado,
+          cantidadBuena: det.cantidadBuena != null ? Number(det.cantidadBuena) : null,
+          cantidadMala:  det.cantidadMala  != null ? Number(det.cantidadMala)  : null,
+          comentario:    det.comentario || null,
         })),
         recojos: recojosAsociados.map(r => ({
           id:             r.id,
@@ -294,10 +299,15 @@ const listarDevoluciones = async (req, res, next) => {
           apellido: d.tecnico.usuario.apellido,
         },
         detalles: d.detalles.map(det => ({
-          productoId: det.productoId,
-          nombre:     det.producto.nombre,
-          unidad:     det.producto.unidad,
-          cantidad:   Number(det.cantidad),
+          id:            det.id,
+          productoId:    det.productoId,
+          nombre:        det.producto.nombre,
+          unidad:        det.producto.unidad,
+          cantidad:      Number(det.cantidad),
+          estado:        det.estado,
+          cantidadBuena: det.cantidadBuena != null ? Number(det.cantidadBuena) : null,
+          cantidadMala:  det.cantidadMala  != null ? Number(det.cantidadMala)  : null,
+          comentario:    det.comentario || null,
         })),
         // BUG 5 FIX: siempre incluir nombre del producto en recojos
         recojos: recojosAsociados.map(r => ({
@@ -351,34 +361,29 @@ const aprobarDevolucion = async (req, res, next) => {
     // No se bloquea aunque haya equipos sin revisar.
 
     await prisma.$transaction(async (tx) => {
+      
+      
       for (const detalle of devolucion.detalles) {
         const productoId = detalle.productoId;
         const cantidad   = Number(detalle.cantidad);
 
-        // 1. Descontar de AsignacionTecnico
+        // 1. Descontar de AsignacionTecnico — el técnico ya no tiene este material,
+        // sin importar si después resulta bueno o malo en la inspección.
         await tx.asignacionTecnico.updateMany({
           where: { tecnicoId: devolucion.tecnicoId, productoId, sedeId: devolucion.sedeId },
           data:  { cantidad: { decrement: cantidad } },
         });
 
-        // 2. Sumar al StockSede
-        await tx.stockSede.upsert({
-          where:  { sedeId_productoId: { sedeId: devolucion.sedeId, productoId } },
-          create: { sedeId: devolucion.sedeId, productoId, cantidad },
-          update: { cantidad: { increment: cantidad } },
-        });
-
-        // 3. Registrar entrada de stock para auditoría
-        await tx.entradaStock.create({
-          data: {
-            productoId,
-            cantidad,
-            registradoPor: String(req.usuario.id),
-            sedeId:        devolucion.sedeId,
-            comentario:    `Devolucion tecnico #${devolucionId} (material regular)`,
-          },
+        // 2. NO se suma al stock aquí. El material queda "en_revision" — el admin
+        // debe inspeccionarlo (bueno/malo) vía /devoluciones/detalle/:id/revisar
+        // antes de que cualquier unidad entre al stock. Mismo patrón que ONUs/recojos.
+        await tx.devolucionDetalle.update({
+          where: { id: detalle.id },
+          data:  { estado: 'en_revision' },
         });
       }
+
+
 
       // Procesar ONUs pendientes (cliente = devolucion_pendiente#ID):
       // Al aprobar el material, las ONUs en estado devolucion_pendiente se liberan a la sede.
@@ -575,16 +580,18 @@ const revisarRecojo = async (req, res, next) => {
         // BUG 4 FIX: solo marcar como OnuReciclada si viene de un retiro de cliente
         // (no de una devolucion de ONU asignada). Los recojos de devolucion tienen
         // grupoOrden=null y comentario con "Devuelto en devolucion #...".
+        
+        // Siempre suma a stockTotal cuando el recojo se aprueba bueno — ya sea porque
+        // nunca había pasado por el sistema (retiro de algo que el cliente ya tenía),
+        // o porque salió de stockTotal cuando se consumió/instaló originalmente.
+        // El ciclo consumo↓ / recojo-bueno↑ es simétrico, sin necesidad de inferir origen.
+        await tx.producto.update({
+          where: { id: recojo.productoId },
+          data:  { stockTotal: { increment: 1 } },
+        });
+
         const esDeRetiroCliente = recojo.grupoOrden !== null ||
           (recojo.comentario && !recojo.comentario.startsWith('Devuelto en devolucion'));
-
-          // Equipo de retiro de cliente: nunca estuvo en stockTotal → sumar
-        if (esDeRetiroCliente) {
-          await tx.producto.update({
-            where: { id: recojo.productoId },
-            data:  { stockTotal: { increment: 1 } },
-          });
-        }
 
         if (esDeRetiroCliente) {
           await tx.onuReciclada.create({
@@ -846,6 +853,77 @@ const reingresarOnuMalograda = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── POST /api/stock/devoluciones/detalle/:id/revisar ──────────
+// Inspección de material normal devuelto (sin código único, como ONUs).
+// El admin divide la cantidad total entre buena (suma al stock) y mala
+// (se descarta, queda solo como auditoría). cantidadBuena + cantidadMala
+// debe ser exactamente igual a la cantidad original declarada.
+const revisarDetalleDevolucion = async (req, res, next) => {
+  try {
+    const detalleId = Number(req.params.id);
+    const { cantidadBuena, cantidadMala, comentario } = req.body;
+
+    const detalle = await prisma.devolucionDetalle.findUnique({
+      where: { id: detalleId },
+      include: { devolucion: true },
+    });
+    if (!detalle) return res.status(404).json({ error: 'Detalle no encontrado' });
+    if (detalle.estado !== 'en_revision')
+      return res.status(400).json({ error: `Este detalle no está pendiente de revisión (estado: ${detalle.estado})` });
+
+    const buena = Number(cantidadBuena) || 0;
+    const mala  = Number(cantidadMala) || 0;
+    const total = Number(detalle.cantidad);
+
+    if (buena < 0 || mala < 0)
+      return res.status(400).json({ error: 'Las cantidades no pueden ser negativas' });
+    if (Math.abs((buena + mala) - total) > 0.01)
+      return res.status(400).json({ error: `La suma de buena (${buena}) + mala (${mala}) debe ser igual a la cantidad devuelta (${total})` });
+
+    await prisma.$transaction(async (tx) => {
+      
+      
+      if (buena > 0) {
+        // Sumar solo la parte buena al StockSede. NO se toca stockTotal — este
+        // material ya estaba contado ahí desde que el admin lo asignó originalmente
+        // al técnico (salidaStock); devolverlo solo lo mueve de vuelta de
+        // AsignacionTecnico a StockSede, no es una entrada nueva al sistema.
+        await tx.stockSede.upsert({
+          where:  { sedeId_productoId: { sedeId: detalle.devolucion.sedeId, productoId: detalle.productoId } },
+          create: { sedeId: detalle.devolucion.sedeId, productoId: detalle.productoId, cantidad: buena },
+          update: { cantidad: { increment: buena } },
+        });
+        await tx.entradaStock.create({
+          data: {
+            productoId:    detalle.productoId,
+            cantidad:      buena,
+            registradoPor: String(req.usuario.id),
+            sedeId:        detalle.devolucion.sedeId,
+            comentario:    `Devolucion tecnico #${detalle.devolucionId} — revisado OK (${buena} de ${total})`,
+          },
+        });
+      }
+
+      // La parte mala (si hay) no suma a nada — solo queda registrada en el
+      // propio detalle (cantidadMala) como auditoría de pérdida.
+
+      await tx.devolucionDetalle.update({
+        where: { id: detalleId },
+        data: {
+          estado:        'revisado',
+          cantidadBuena: buena,
+          cantidadMala:  mala,
+          comentario:    comentario || null,
+          revisadoPor:   String(req.usuario.id),
+          fechaRevision: new Date(),
+        },
+      });
+    });
+
+    res.json({ ok: true, message: `Revisión guardada: ${buena} buenas, ${mala} malas` });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   registrarDevolucion,
   misDevoluciones,
@@ -855,4 +933,5 @@ module.exports = {
   revisarRecojo,
   listarMalogrados,
   reingresarOnuMalograda,
+  revisarDetalleDevolucion,
 };

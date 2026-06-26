@@ -664,12 +664,18 @@ model DevolucionTecnico {
 }
 
 model DevolucionDetalle {
-  id           Int               @id @default(autoincrement())
-  devolucionId Int               @map("devolucion_id")
-  productoId   Int               @map("producto_id")
-  cantidad     Decimal           @db.Decimal(10, 2)
-  devolucion   DevolucionTecnico @relation(fields: [devolucionId], references: [id])
-  producto     Producto          @relation(fields: [productoId], references: [id])
+  id            Int               @id @default(autoincrement())
+  devolucionId  Int               @map("devolucion_id")
+  productoId    Int               @map("producto_id")
+  cantidad      Decimal           @db.Decimal(10, 2)
+  estado        String            @default("pendiente")   // pendiente | en_revision | revisado
+  cantidadBuena Decimal?          @map("cantidad_buena") @db.Decimal(10, 2)
+  cantidadMala  Decimal?          @map("cantidad_mala")  @db.Decimal(10, 2)
+  comentario    String?
+  revisadoPor   String?           @map("revisado_por")
+  fechaRevision DateTime?         @map("fecha_revision")
+  devolucion    DevolucionTecnico @relation(fields: [devolucionId], references: [id])
+  producto      Producto          @relation(fields: [productoId], references: [id])
 
   @@map("devolucion_detalles")
 }
