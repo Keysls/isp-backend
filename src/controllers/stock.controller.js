@@ -1408,13 +1408,42 @@ for (const item of itemsNormalizados) {
     for (const item of itemsNormalizados) {
       const unidadesConsumidas = Math.floor(Number(item.cantidad));
       if (unidadesConsumidas <= 0) continue;
+      if (item.codigoPon) continue; // ONUs no usan este flujo de recojos por cantidad
 
-      // El técnico elige explícitamente cuántas unidades de las consumidas son
-      // recicladas. Se limita por seguridad a no pedir más recicladas de las
-      // que realmente se consumieron en total.
-      const unidadesRecicladasPedidas = Math.min(
-        Math.floor(Number(item.unidadesRecicladas) || 0),
-        unidadesConsumidas
+      // Stock no-reciclado real disponible: asignado - utilizado_previo
+      // (sin contar reciclados en_mano). Si el checkbox dice "no reciclado"
+      // pero ya no queda stock normal, el sistema fuerza usar reciclados —
+      // así nunca queda un Recojo huérfano mientras el numérico llega a 0.
+      const asignacion = await prisma.asignacionTecnico.findFirst({
+        where: { tecnicoId: tecnico.id, productoId: item.productoId },
+        select: { cantidad: true },
+      });
+      const asignado = Number(asignacion?.cantidad || 0);
+
+      const utilizadoPrevio = await prisma.consumoTecnico.aggregate({
+        where: { tecnicoId: tecnico.id, productoId: item.productoId },
+        _sum: { cantidad: true },
+      });
+      const yaUtilizado = Number(utilizadoPrevio._sum.cantidad || 0);
+
+      const recojosEnManoCount = await prisma.recojo.count({
+        where: { tecnicoId: tecnico.id, estado: 'en_mano', productoId: item.productoId },
+      });
+
+      // Validación dura: no se puede consumir más de lo que realmente existe
+      // (asignado normal restante + reciclados en mano).
+      const disponibleNormal = Math.max(0, asignado - yaUtilizado - recojosEnManoCount);
+      const totalDisponible = disponibleNormal + recojosEnManoCount;
+      if (unidadesConsumidas > totalDisponible) {
+        throw new Error(`Stock insuficiente para producto ID ${item.productoId}: disponible ${totalDisponible}, solicitado ${unidadesConsumidas}`);
+      }
+
+      // Si lo normal no alcanza, se completa automáticamente con reciclados,
+      // sin importar lo que haya marcado el checkbox.
+      const faltanteNormal = Math.max(0, unidadesConsumidas - disponibleNormal);
+      const unidadesRecicladasPedidas = Math.max(
+        Math.min(Math.floor(Number(item.unidadesRecicladas) || 0), unidadesConsumidas),
+        faltanteNormal
       );
       if (unidadesRecicladasPedidas <= 0) continue;
 
@@ -1425,13 +1454,10 @@ for (const item of itemsNormalizados) {
           productoId: item.productoId,
         },
         select: { id: true },
-        take: unidadesRecicladasPedidas,   // ← solo lo que el técnico eligió, no lo asumido
+        take: unidadesRecicladasPedidas,
       });
 
       if (recojosDisponibles.length > 0) {
-        // Solo marcar el recojo como "entregado" (ya no está en_mano). NO se
-        // decrementa AsignacionTecnico aquí — el descuento real de disponibilidad
-        // ya lo cubre ConsumoTecnico vía (asignado - utilizado) en miInventario.
         await prisma.recojo.updateMany({
           where: { id: { in: recojosDisponibles.map(r => r.id) } },
           data: {
