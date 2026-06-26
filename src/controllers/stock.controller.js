@@ -400,22 +400,10 @@ const enviarProductosSede = async (req, res, next) => {
         },
       });
 
-      // ── Items normales por cantidad ──
-      const normalized = new Map();
-      for (const item of items) {
-        const productoId = Number(item.producto_id ?? item.productoId);
-        const cantidad = toInt(item.cantidad);
-        if (!productoId || cantidad <= 0) throw new Error('Producto o cantidad invalidos');
-        normalized.set(productoId, (normalized.get(productoId) || 0) + cantidad);
-      }
-      for (const [productoId, cantidad] of normalized.entries()) {
-        await decrementStockSede(tx, { sedeId: sedeOrigenId, productoId, cantidad });
-        await tx.envioDetalle.create({
-          data: { envioId: envio.id, productoId, cantidad },
-        });
-      }
-
-      // ── ONUs específicas por código PON ──
+      // ── ONUs específicas por código PON (elegidas explícitamente) ──
+      // Se procesan PRIMERO: si el usuario ya eligió códigos concretos para
+      // completar una cantidad (ver bloque de items abajo), el frontend ya
+      // restó esas unidades de la cantidad genérica antes de enviar el request.
       for (const onuId of onuIds) {
         const onu = await tx.onu.findFirst({
           where: { id: Number(onuId), sedeId: sedeOrigenId, tecnicoId: null, salidaDirecta: false },
@@ -436,6 +424,60 @@ const enviarProductosSede = async (req, res, next) => {
         // Registrar en el detalle del envío
         await tx.envioDetalle.create({
           data: { envioId: envio.id, productoId: onu.productoId, cantidad: 1 },
+        });
+      }
+
+      // ── Items normales por cantidad ──
+      const normalized = new Map();
+      for (const item of items) {
+        const productoId = Number(item.producto_id ?? item.productoId);
+        const cantidad = toInt(item.cantidad);
+        if (!productoId || cantidad <= 0) throw new Error('Producto o cantidad invalidos');
+        normalized.set(productoId, (normalized.get(productoId) || 0) + cantidad);
+      }
+      // Contar cuántas unidades por productoId ya se procesaron como ONU
+      // explícita arriba — para restarlas de la "cantidad total" y no duplicar.
+      const onusExplicitasPorProducto = new Map();
+      for (const onuId of onuIds) {
+        const onu = await tx.onu.findUnique({ where: { id: Number(onuId) }, select: { productoId: true } });
+        if (onu) onusExplicitasPorProducto.set(onu.productoId, (onusExplicitasPorProducto.get(onu.productoId) || 0) + 1);
+      }
+
+      for (const [productoId, cantidadTotal] of normalized.entries()) {
+        // cantidadTotal es lo que el usuario tipeó como TOTAL a enviar de ese
+        // producto. Si parte de ese total ya viajó como ONU explícita (onuIds),
+        // se resta aquí — el resto se completa con ONUs sin código o número puro.
+        const yaExplicitas = onusExplicitasPorProducto.get(productoId) || 0;
+        const cantidad = cantidadTotal - yaExplicitas;
+        if (cantidad < 0) throw new Error(`Cantidad inválida para producto ID ${productoId}: hay más códigos seleccionados que la cantidad total`);
+        if (cantidad === 0) continue;
+
+        const onusSinCodigoDisponibles = await tx.onu.findMany({
+          where: {
+            productoId,
+            sedeId:        sedeOrigenId,
+            codigoPon:     null,
+            tecnicoId:     null,
+            salidaDirecta: false,
+          },
+          select: { id: true },
+          take: cantidad,
+        });
+
+        for (const onuSinCodigo of onusSinCodigoDisponibles) {
+          await tx.onu.update({
+            where: { id: onuSinCodigo.id },
+            data:  { sedeId: sedeDestinoId, cliente: `envio_pendiente#${envio.id}` },
+          });
+        }
+
+        // El número de StockSede SIEMPRE se mueve por la cantidad total pedida
+        // (sea o no haya filas Onu detrás) — el origen se descuenta ahora; el
+        // destino solo se confirma en confirmarEnvio, nunca aquí, para permitir
+        // corregir el conteo si lo que llega físicamente no coincide.
+        await decrementStockSede(tx, { sedeId: sedeOrigenId, productoId, cantidad });
+        await tx.envioDetalle.create({
+          data: { envioId: envio.id, productoId, cantidad },
         });
       }
     });

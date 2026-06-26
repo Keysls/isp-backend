@@ -592,6 +592,12 @@ CREATE TABLE "devolucion_detalles" (
     "devolucion_id" INTEGER NOT NULL,
     "producto_id" INTEGER NOT NULL,
     "cantidad" DECIMAL(10,2) NOT NULL,
+    "estado" TEXT NOT NULL DEFAULT 'pendiente',
+    "cantidad_buena" DECIMAL(10,2),
+    "cantidad_mala" DECIMAL(10,2),
+    "comentario" TEXT,
+    "revisado_por" TEXT,
+    "fecha_revision" TIMESTAMP(3),
 
     CONSTRAINT "devolucion_detalles_pkey" PRIMARY KEY ("id")
 );

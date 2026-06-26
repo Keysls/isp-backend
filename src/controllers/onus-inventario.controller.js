@@ -29,6 +29,11 @@ const listar = async (req, res, next) => {
     const sedeId = getSedeId(req);
     const productoId = Number(req.query.producto_id || req.query.productoId);
     const soloDisponibles = req.query.solo_disponibles === 'true' || req.query.soloDisponibles === 'true';
+    // Si viene este flag, "disponibles" NO exige codigoPon — incluye también
+    // las ONUs que son solo stock numérico sin fila individual codificada aún.
+    // Necesario para que el frontend pueda calcular cuántas sin código hay
+    // disponibles y así decidir si pedir códigos para completar una cantidad.
+    const incluirSinCodigo = req.query.incluir_sin_codigo === 'true' || req.query.incluirSinCodigo === 'true';
 
     if (!sedeId) return res.status(400).json({ error: 'Debe indicar una sede' });
 
@@ -38,7 +43,7 @@ const listar = async (req, res, next) => {
         ...(productoId && { productoId }),
         // Sin activacionId/averiaId — disponibilidad por tecnicoId y salidaDirecta
         ...(soloDisponibles && {
-          codigoPon: { not: null },
+          ...(incluirSinCodigo ? {} : { codigoPon: { not: null } }),
           tecnicoId: null,
           cliente:   null,
           salidaDirecta: false,
