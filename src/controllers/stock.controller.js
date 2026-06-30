@@ -1470,8 +1470,6 @@ for (const item of itemsNormalizados) {
     }
 
 
-
-
     // ── Desvincular ONUs instaladas en cliente ─────────────────
     const itemsConPon = items.filter(i => i.codigoPon);
     if (itemsConPon.length > 0) {
@@ -1483,6 +1481,20 @@ for (const item of itemsNormalizados) {
         data: {
           tecnicoId: null,
           cliente:   ordenId || null,
+        },
+      });
+
+      // FIX: marcar también el Recojo (en_mano) de estas ONUs como entregado,
+      // si no, el material reciclado queda "fantasma" en el inventario.
+      await prisma.recojo.updateMany({
+        where: {
+          tecnicoId: tecnico.id,
+          estado:    'en_mano',
+          codigoPon: { in: itemsConPon.map(i => i.codigoPon) },
+        },
+        data: {
+          estado:     'entregado',
+          comentario: ordenId ? `Usado en orden: ${ordenId}` : 'Usado en servicio',
         },
       });
     }
